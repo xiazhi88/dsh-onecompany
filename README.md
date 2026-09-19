@@ -112,7 +112,10 @@ storage domain `onecompany` v1（json 后端）：`agents` / `projects` / `docs`
 | 「项目名 · 项目群」 | CEO 的项目实例 | 该项目一切汇报与派活（**汇报默认落这里**） |
 | 「员工名 · 工位」 | 员工本人 | 任务帧落点 + 执行现场（偏审计） |
 
-- **汇报路由**：`company_report` 按任务的项目归属投到对应项目群；无归属 → 大厅；审批/阻塞 → 大厅 + 面板角标。董事会信箱不再被汇报刷屏。
+- **汇报路由**：`company_report` 按任务的项目归属归口。**投递模式由 `reportDelivery` 决定**：
+  - `digest`（默认）：投到项目群/大厅，由 CEO 转成给董事会的易读简报（一轮模型调用）；
+  - `record`：**不叫醒任何 agent**——原文追加进项目档案的《汇报流水》，同时进面板未读信箱（零 token、零回声）。
+  审批/阻塞类仍会正常送达需要裁决的人。
 - **派活三条路**：① 任意会话里 `@员工名`（`@` 是共享多分组触发器，与原生文件引用、子会话并列，`name: onecompany` 唯一）→ 模型调 `company_call`；② `/call <员工> <任务>`（命令直达，不经模型）；③ `/company assign`。
 - **面板跳转**：组织页「打开工位」、资料库项目页「打开项目群」→ 直接切到原生会话（目标工作区未加载时会先连接再打开）。
 - **固定会话标题**：工位/项目群/大厅创建即改名（`ctx.sessionTitle.rename`）。
@@ -126,6 +129,7 @@ storage domain `onecompany` v1（json 后端）：`agents` / `projects` / `docs`
 ```yaml
         autoProvision: true      # 启动时自动补建 CEO 与项目群会话
         kickoffOnCreate: true    # 新建会话后发开场消息（让会话出现在侧栏）
+        reportDelivery: record   # digest = CEO 转简报；record = 只归档 + 面板未读（不叫醒 agent）
 ```
 
 ## 搭建你自己的公司

@@ -32,6 +32,12 @@ export interface Config {
   autoProvision: boolean
   /** 新建会话后发一条开场消息（让会话有首个轮次、出现在侧栏）。 */
   kickoffOnCreate: boolean
+  /**
+   * 汇报投递模式：
+   * - `digest`（默认）CEO 把原始汇报转成给董事会的易读简报（会有一轮模型调用）
+   * - `record` 只归档进项目档案 + 进面板未读，**不叫醒任何 agent**（零 token、零回声）
+   */
+  reportDelivery: 'digest' | 'record'
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -44,6 +50,7 @@ export const Config: Schema<Config> = Schema.object({
   timeZone: Schema.string().default('Asia/Shanghai'),
   autoProvision: Schema.boolean().default(true),
   kickoffOnCreate: Schema.boolean().default(true),
+  reportDelivery: Schema.union(['digest', 'record']).default('record'),
 })
 
 /**
@@ -135,6 +142,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       approvalsRequired: config.approvalsRequired,
       timeZone: config.timeZone,
       companyName: config.companyName,
+      reportDelivery: config.reportDelivery,
     },
     deliver: async (record, text, notice) => {
       if (driver === undefined) throw new Error('员工驱动尚未就绪')

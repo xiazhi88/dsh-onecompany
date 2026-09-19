@@ -190,6 +190,8 @@ export const zCompanyState = z.object({
   worklogs: z.array(zWorklog),
   activity: z.array(zActivity),
   residentIds: z.array(z.string()),
+  /** 当前汇报投递模式（digest/record），面板展示用。 */
+  reportDelivery: z.string(),
   stats: z.object({
     agents: z.number(),
     activeTasks: z.number(),

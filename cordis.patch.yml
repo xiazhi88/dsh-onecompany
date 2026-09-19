@@ -16,3 +16,9 @@
         approvalsRequired: [hire, spend, strategy, danger]
         # 定时任务默认时区（IANA）。
         timeZone: Asia/Shanghai
+        # 启动时自动补建 CEO 与项目群会话。
+        autoProvision: true
+        # 新建会话后发开场消息（让它出现在侧栏）。
+        kickoffOnCreate: true
+        # 汇报投递：digest = CEO 转成简报；record = 只归档 + 面板未读，不叫醒任何 agent。
+        reportDelivery: record

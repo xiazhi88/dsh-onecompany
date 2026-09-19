@@ -133,6 +133,7 @@ export function Overview(props: { state: CompanyState; onNavigate: (view: ViewId
         <span className="oc-meta__item">公司根目录 <span className="oc-mono">{state.root}</span></span>
         <span className="oc-meta__item">调度周期 {(state.tickMs / 1000).toFixed(0)}s</span>
         <span className="oc-meta__item">今日 {state.today}</span>
+        <span className="oc-meta__item">汇报投递：{state.reportDelivery === 'record' ? '归档（不叫醒 agent）' : 'CEO 简报'}</span>
       </div>
     </div>
   )

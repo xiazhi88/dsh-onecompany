@@ -3,9 +3,9 @@
  * 所有业务状态写进 storage domain；对员工的投递经司机（driver）落到其会话收件箱。
  */
 import { randomUUID } from 'node:crypto'
-import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
+import { appendFile, readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   ActionResult, AccessLevel, ActivityRecord, AgentPatch, AgentRecord, ApprovalInput,
@@ -41,6 +41,8 @@ export interface ServiceDeps {
     approvalsRequired: string[]
     timeZone: string
     companyName: string
+    /** 汇报投递模式：digest = CEO 转成简报；record = 只归档 + 面板未读，不叫醒任何 agent。 */
+    reportDelivery: 'digest' | 'record'
   }
   /** 向某员工的会话投递一条消息。 */
   deliver: (record: AgentRecord, text: string, notice?: string) => Promise<void>
@@ -1141,6 +1143,7 @@ export class CompanyService {
         .sort((a, b) => b.at - a.at)
         .slice(0, 200),
       residentIds: this.deps.residentIds(),
+      reportDelivery: this.deps.config.reportDelivery,
       stats: {
         agents: this.agents().filter((record) => record.status === 'active').length,
         activeTasks: tasks.filter((record) => record.status === 'in_progress' || record.status === 'review').length,
@@ -1218,6 +1221,18 @@ export class CompanyService {
    * @param taskId - 关联任务（可选）。
    */
   async report(actor: Actor, body: string, taskId: string | null = null): Promise<ActionResult<MessageRecord>> {
+    if (this.deps.config.reportDelivery === 'record') {
+      const task = taskId === null ? undefined : this.deps.domain.table('tasks').get(taskId)
+      const projectId = task?.projectId ?? null
+      const path = await this.appendReportLog(projectId, actor, body, taskId === null ? '汇报' : `汇报 · ${taskId}`)
+      await this.log(actor, 'report.record', `${actor.name} 的汇报已归档 ${path}`)
+      return this.sendMail(actor, {
+        toId: 'board',
+        kind: 'report',
+        body: `${body}\n\n---\n已归档到 ${path}（汇报投递模式：record，未叫醒任何 agent）`,
+        taskId,
+      })
+    }
     let toId: string | null = null
     if (taskId !== null) {
       const task = this.deps.domain.table('tasks').get(taskId)
@@ -1238,6 +1253,15 @@ export class CompanyService {
    * @param text - 简报正文（markdown）。
    */
   async announce(actor: Actor, projectId: string | null, text: string): Promise<ActionResult<MessageRecord>> {
+    if (this.deps.config.reportDelivery === 'record') {
+      const path = await this.appendReportLog(projectId, actor, text, '播报')
+      await this.log(actor, 'announce.record', `${actor.name} 的播报已归档 ${path}`)
+      return this.sendMail(actor, {
+        toId: 'board',
+        kind: 'announce',
+        body: `${text}\n\n---\n已归档到 ${path}（汇报投递模式：record）`,
+      })
+    }
     const ceo = this.ceo()
     const target = projectId ?? ceo?.id ?? 'board'
     // CEO 对大厅「播报」= 就是它自己所在会话：不给自己发信（会自唤醒成回声），
@@ -1256,6 +1280,34 @@ export class CompanyService {
       return { ok: false, code: 'unknown_assignee', message: `员工 ${input.employeeId} 不存在` }
     }
     return this.createTask(actor, { ...input, assigneeId: input.employeeId })
+  }
+
+  /**
+   * 把一段汇报/播报追加进项目（或公司）档案的《汇报流水》文件，并维护资料索引。
+   * record 模式用它替代「叫醒 agent 转写简报」。
+   * @returns 相对公司根目录的展示路径。
+   */
+  private async appendReportLog(projectId: string | null, actor: Actor, body: string, label: string): Promise<string> {
+    const project = projectId === null ? undefined : this.deps.domain.table('projects').get(projectId)
+    const base = project?.rootPath ?? this.deps.paths.library
+    const relative = project === undefined ? '汇报流水.md' : 'reports/汇报流水.md'
+    const file = join(base, relative)
+    await mkdir(dirname(file), { recursive: true })
+    const stamp = new Date().toISOString()
+    await appendFile(file, `\n\n## ${stamp} · ${actor.name} · ${label}\n\n${body}\n`, 'utf8')
+    const shown = displayPath(this.deps.paths.root, file)
+    const existing = this.docs().find((doc) => doc.path === shown)
+    const record: DocRecord = {
+      id: existing?.id ?? `doc_${randomUUID().slice(0, 8)}`,
+      projectId,
+      title: existing?.title ?? (project === undefined ? '公司汇报流水' : `${project.name} · 汇报流水`),
+      path: shown,
+      tags: ['汇报流水'],
+      createdBy: actor.name,
+      updatedAt: Date.now(),
+    }
+    await this.deps.domain.table('docs').put(record.id, record)
+    return shown
   }
 
   /** 员工/频道显示名。 */

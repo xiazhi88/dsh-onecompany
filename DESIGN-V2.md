@@ -85,6 +85,13 @@
 - 员工甲/员工乙的 `projectIds` 用迁移脚本补（`prj_pulse` / `prj_desic`），`managerId` → `agt_ceo`；
 - 现有两位员工的工位会话补固定标题（rename）。
 
+## 8.5 汇报投递模式（record）
+
+`reportDelivery: 'digest' | 'record'`。`record` 下 `company_report` / `company_announce`
+不再投递给任何 agent：原文追加到项目（或公司）档案的《汇报流水》（并维护资料索引），
+同时以董事会信箱消息进入面板未读。这样「信息性汇报」零 token、零回声；
+需要人拍板的审批与派工仍走正常投递。
+
 ## 9. 启用开关语义不变
 
 关掉 = 停调度、停投递、停公司工具、@源与公司工具从根会话消失（effect 撤销），数据与会话原样保留；开 = 全部恢复。
