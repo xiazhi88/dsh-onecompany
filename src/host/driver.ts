@@ -55,6 +55,12 @@ export interface DriverDeps {
   /** 给公司 agent 禁掉用不到的工具（省下每步的工具 schema token）。 */
   restrictTools?: (agentCtx: Context, kind: 'employee' | 'hall' | 'channel') => void
   /**
+   * 该会话是否属于公司（大厅/项目群/工位/任务会话）。
+   * `deliverToSession` 用它兜底：公司会话必须走各自的组合通道，否则会被「裸 preset」
+   * 重新组合、公司工具全部消失。
+   */
+  isCompanySession?: (sessionId: string) => boolean
+  /**
    * 新建会话后的开场消息：没有跑过轮次的会话是 blank，会被客户端从侧栏隐藏，
    * 也选不中；发一句话既让它可见，也让员工/频道正式亮相。空串 = 不发。
    */
@@ -182,6 +188,9 @@ export class AgentDriver {
    * @param notice - 一行摘要（按通知行折叠显示）。
    */
   async deliverToSession(sessionId: string, text: string, notice?: string): Promise<void> {
+    if (this.deps.isCompanySession?.(sessionId) === true) {
+      throw new Error(`deliverToSession 只用于非公司会话（${sessionId} 属于公司，请走 ensure/ensureChannel/ensureTask）`)
+    }
     const registry = this.deps.ctx.agents as unknown as {
       get: (id: string) => Agent | undefined
       resume: (input: { resumeSessionId: string; agentOptions?: AgentOptions; setup?: (ctx: Context) => Promise<void> | void }) => Promise<Agent>

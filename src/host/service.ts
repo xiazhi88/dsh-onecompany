@@ -1555,8 +1555,21 @@ export class CompanyService {
       `---`,
       `由 ${who} 派发；原文已归档到 ${archivePath}。`,
     ].join('\n')
+    const notice = `${actor.name} 汇报了「${task?.title ?? '任务'}」`
     try {
-      await this.deps.deliverToSession(target, text, `${actor.name} 汇报了「${task?.title ?? '任务'}」`)
+      // 按目标会话的归属选投递通道：公司会话必须走各自的组合（大会/项目群/工位），
+      // 否则会被「裸 preset」重新组合、公司工具全部消失（踩过：CEO 大厅变成普通 agent）。
+      const ceo = this.ceo()
+      if (ceo !== undefined && target === ceo.sessionId) {
+        await this.deps.deliver(ceo, text, notice)
+      } else {
+        const channelProject = this.projects().find((project) => project.channelSessionId === target)
+        const workbench = this.agents().find((record) => record.sessionId === target)
+        if (channelProject !== undefined) await this.deps.deliverChannel(channelProject, text, notice)
+        else if (workbench !== undefined) await this.deps.deliver(workbench, text, notice)
+        else if (this.isCompanySession(target)) throw new Error('目标是公司会话但无法归属（跳过，避免裸组合）')
+        else await this.deps.deliverToSession(target, text, notice)
+      }
       return `，并已回投派发会话`
     } catch (error) {
       const message = describe(error)

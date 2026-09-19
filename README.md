@@ -258,6 +258,18 @@ lib/           构建产物（随仓库提供，从 GitHub 安装即可用，无
 3. **长活开子会话**：子会话上下文从零起，主会话只留结论（提示词里已要求）。
 4. **CEO 三实例**：大厅 + 每个项目群各一个常驻实例，各有独立上下文；项目少开一个就能省一份。
 
+## 踩过的坑（务必别重犯）
+
+- **绝不能用「裸 preset」重新组合公司会话**：`deliverToSession` 之类为了往任意会话投递而
+  resume 一个会话时，如果目标是公司会话（大厅/项目群/工位/任务会话），必须走各自的组合
+  通道（`ensure` / `ensureChannel` / `ensureTask`）。否则那个会话会被重新组合成一个只有
+  平台工具的普通 agent —— 表现是**所有 company_* 工具报 `unknown tool`**。现在服务按
+  归属选通道，driver 里还有 `isCompanySession` 兜底直接拒绝。
+- **绝不在 agent 自己的轮次里 await `dispose()`**：`handle.dispose()` 会等当前轮次结算，
+  从这轮的工具调用里同步 await 必然死锁。收尾停会话要「登记 + 空闲后由 tick 停」。
+- **动态清单不要塞进系统提示词**：系统提示词在 prompt 最前，缓存是前缀匹配，其中任何一段
+  变化都会让其后的整段对话历史缓存失效、按全价重算（`compactPrompt` 就是为此）。
+
 ## 已知成本与后续可优化
 
 - **客户端包体**：`lib/client.js` 535KB（minify 后，gzip 113KB）。其中约 400KB 是 zod：客户端的 generated Remote 装配**要求 strict codec（zod 实例）**，因此 `src/client/remote.ts` 必须带 host 清单的 schema。试过用构建期生成的纯数据描述符（`src-json`）把包压到 137KB，但装配层直接拒绝（`generated Remote <field> has no strict codec`），因此保留现状。

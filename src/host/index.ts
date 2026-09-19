@@ -327,6 +327,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
     maxResident: Math.max(1, config.maxResidentAgents),
     restrictTools,
+    isCompanySession: (sessionId: string) => service.isCompanySession(sessionId),
     kickoff: (kind, label) => {
       if (!config.kickoffOnCreate) return ''
       if (kind === 'employee' && !config.employeeKickoff) return ''
