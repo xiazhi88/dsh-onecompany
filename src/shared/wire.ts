@@ -14,6 +14,8 @@ export const zApprovalStatus = z.enum(['pending', 'approved', 'rejected'])
 export const zScheduleKind = z.enum(['cron', 'every', 'at'])
 
 export const zPermissions = z.object({
+  /** 是否允许给他人派活/建任务（董事会永远可以；员工默认没有，CEO 有）。 */
+  canDispatch: z.boolean().default(false),
   projects: z.record(z.string(), zAccessLevel),
   tools: z.array(z.string()),
   canHire: z.boolean(),
@@ -118,6 +120,10 @@ export const zApproval = z.object({
   kind: zApprovalKind,
   /** 批准后由服务自动执行的结构化动作（如 hire），null = 纯人工动作。 */
   action: z.object({ kind: z.string(), payload: z.unknown() }).nullable().default(null),
+  /** 一句话：要董事会决定什么（面向非技术读者的行动请求）。 */
+  ask: z.string().default(''),
+  /** 三行以内的人话摘要：做什么 / 为什么要你决定 / 不批会怎样。 */
+  summary: z.string().default(''),
   title: z.string(),
   detail: z.string(),
   requesterType: z.enum(['board', 'agent', 'system']),
@@ -298,6 +304,10 @@ export type MailInput = z.infer<typeof zMailInput>
 export const zApprovalInput = z.object({
   kind: zApprovalKind,
   title: z.string(),
+  /** 一句话行动请求：董事会要点头/摇头的是什么。 */
+  ask: z.string().optional(),
+  /** 人话摘要（≤3 行）：做什么 / 为什么要你决定 / 不批会怎样。 */
+  summary: z.string().optional(),
   detail: z.string(),
   agentId: z.string().nullable().optional(),
   action: z.object({ kind: z.string(), payload: z.unknown() }).nullable().optional(),

@@ -38,7 +38,11 @@ export function buildCompanyTools(service: CompanyService, agentId: string): Too
     }
   }
 
-  return [
+  // 工作只由董事会分发：没有派活权的员工，工具面里不出现「建任务 / 自我排程」，
+  // 免得模型看见却用不了（那会让它反复试错）。
+  const canDispatch = service.mayDispatch({ type: 'agent', id: agentId, name: agentId })
+
+  const tools: ToolDefinition[] = [
     defineTool({
       name: 'company_org',
       description: '查看公司组织架构与通讯录（姓名/职位/汇报线/员工 ID）。要找人协作、确认汇报关系或查上级 ID 时用。',
@@ -198,16 +202,20 @@ export function buildCompanyTools(service: CompanyService, agentId: string): Too
 
     defineTool({
       name: 'company_approval_request',
-      description: '请求审批：花钱（spend）、上线/对外发布（strategy）、删除或高危操作（danger）、招聘（hire）等越权动作，必须先审批再动手。',
+      description: '请求审批：花钱（spend）、上线/对外发布（strategy）、删除或高危操作（danger）、招聘（hire）等越权动作，必须先审批再动手。写给董事会看的东西要用大白话：董事会不读代码、不看日志。',
       parameters: {
         kind: { type: 'string', required: true, enum: ['hire', 'spend', 'strategy', 'danger', 'other'], description: '审批类别' },
-        title: { type: 'string', required: true, description: '一句话说明要批什么' },
-        detail: { type: 'string', required: true, description: '细节：影响范围、成本、回滚方案、时间点' },
+        title: { type: 'string', required: true, description: '一句话结论（大白话，别用术语），例如「把服务器磁盘从 60G 扩到 100G」' },
+        ask: { type: 'string', required: true, description: '你到底要董事会点头还是摇头：一句话，以动词开头，如「请批准我今晚 22:00 扩容并重启服务」' },
+        summary: { type: 'string', required: true, description: '三行人话摘要，用 markdown 无序列表逐行写：`- 要做什么（大白话）`、`- 为什么要你决定/有什么代价`、`- 不做会怎样`。不要写命令、日志、代码。' },
+        detail: { type: 'string', required: true, description: '技术细节（可写命令、影响面、回滚方案、时间点）——这部分会被折叠，董事会想看才展开。' },
       },
       output: textOutput,
       execute: (args) => perform(async () => service.requestApproval(actorOf(), {
         kind: args.kind as ApprovalKind,
         title: args.title,
+        ask: args.ask,
+        summary: args.summary,
         detail: args.detail,
       })),
     }),
@@ -311,17 +319,23 @@ export function buildCompanyTools(service: CompanyService, agentId: string): Too
       execute: () => perform(async () => ({ ok: true, data: HELP_TEXT })),
     }),
   ]
+  if (!canDispatch) {
+    const hidden = new Set(['company_task_create', 'company_schedule_create', 'company_schedule_delete'])
+    return tools.filter((tool) => !hidden.has((tool as { name?: string }).name ?? ''))
+  }
+  return tools
 }
 
 const HELP_TEXT = [
   '公司协作协议：',
+  '0. **工作只由董事会分发**：你只做派到你名下的任务。不要自己建任务、不要给别人派活、不要自我排程——想推进别的事，写进 company_report 的建议（做什么/为什么/预期产出），等董事会点头。',
   '1. 领任务：company_task_list → company_task_update(checkout=true) → 干活。',
   '2. 要信息：company_org 查人 → company_mail_send(kind=question)。',
-  '3. 要协作：给下属/同事 company_task_create 派任务或 kind=request 请人帮忙。',
+  '3. 要协作：company_mail_send(kind=request) 请同事帮忙（对方是否接、什么时候接由对方与董事会决定；不要替别人建任务）。',
   '4. 卡住了：任务置 blocked（result 写原因），company_report 上报。',
   '5. 越权动作（花钱/上线/删数据/招人）：先 company_approval_request，等 approval_result。',
   '6. 做完：任务置 review，company_doc_write 落产出，company_report 汇报结论。',
-  '7. 例行工作：company_schedule_create 定时提醒自己。',
+  '7. 手上没活时：待命。不要自己找活干、不要为了"显得有产出"而开工。',
 ].join('\n')
 
 // ───────────────────────────── CEO / 频道 / 全局工具 ─────────────────────────────
@@ -395,6 +409,12 @@ export function buildCeoExtras(service: CompanyService, agentId: string): ToolDe
       execute: (args) => perform(async () => service.requestApproval(actorOf(), {
         kind: 'hire',
         title: `招聘 ${args.name}（${args.title}）`,
+        ask: `请批准招聘 ${args.name} 做${args.title}`,
+        summary: [
+          `- 招一个${args.title}，叫 ${args.name}，负责 ${(args.project_ids ?? []).join('、') || '（未指定项目）'}。`,
+          '- 需要你点头：招人会增加长期成本与调度负担。',
+          '- 不批就维持现有人手，相关活继续排在这些项目上。',
+        ].join('\n'),
         detail: [
           `姓名：${args.name}`,
           `职位：${args.title}`,

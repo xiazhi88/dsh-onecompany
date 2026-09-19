@@ -50,7 +50,7 @@ export interface ServiceDeps {
   deliverChannel: (project: ProjectRecord, text: string, notice?: string) => Promise<void>
   /** 预热大厅与项目群会话（reconcile 用；仅启用时调用）。 */
   warmChannels: () => Promise<void>
-  /** 把已存在员工会话的标题归位为「名字 · 工位」。 */
+  /** 把已存在员工会话的标题归位为「姓名 · 职位」。 */
   fixTitles: () => Promise<void>
   /** 读包内 agents/ 目录的岗位说明书。 */
   readBundledPersona: (file: string) => Promise<string>
@@ -69,6 +69,7 @@ const DEFAULT_PERMISSIONS: Permissions = {
   tools: [],
   canHire: false,
   canApprove: false,
+  canDispatch: false,
 }
 
 /** 信箱每个 tick 最多投递条数（避免一次唤醒风暴）。 */
@@ -97,6 +98,17 @@ export class CompanyService {
   /** 领域写入后由 host 层调用，推进指纹。 */
   bumpRevision(): void {
     this.writeSeq += 1
+  }
+
+  /**
+   * 能否给他人派活/建任务/自我排程：董事会永远可以；agent 需要 canDispatch
+   * （默认只有 CEO）。这是「工作只由董事会分发」的闸门。
+   */
+  mayDispatch(actor: Actor): boolean {
+    if (actor.type !== 'agent') return true
+    const record = this.agent(actor.id)
+    if (record === undefined) return false
+    return record.role === 'ceo' || record.permissions.canDispatch === true
   }
 
   // ───────────────────────────── 总开关 ─────────────────────────────
@@ -217,7 +229,7 @@ export class CompanyService {
       ceo.persona.trim() === '' ? '' : `## 岗位说明书\n${ceo.persona.trim()}`,
       `## 名册\n${colleagues === '' ? '（暂无员工）' : colleagues}`,
       `## 全公司未完成任务\n${openTasks === '' ? '（无）' : openTasks}`,
-      '## 工作方式：董事会说什么，你就拆解 → company_dispatch 分派 → 跟踪 → 结果用 company_announce 写成简报。\n## 输出纪律：收到【转投】类通知时，你的整条回复就是简报正文本身——不要复述、不要评论、不要打招呼。招人走 company_hire_request（董事会批准后系统自动入职；没有人事权，别假装已经招到人，也别给不存在的员工派活）。',
+      '## 工作方式：董事会说什么，你就拆解 → company_dispatch 分派 → 跟踪 → 结果用 company_announce 写成简报。\n## 派活权边界（重要）：你只能执行**董事会当次的明确指令**。不要凭旧审批、旧计划或自己的判断给员工派活；不要自动给新员工安排入职任务——那也要先问董事会。开工前先确认「董事会这次让我做什么」；没有指令就不动。\n## 输出纪律：收到【转投】类通知时，你的整条回复就是简报正文本身——不要复述、不要评论、不要打招呼。招人走 company_hire_request（董事会批准后系统自动入职；没有人事权，别假装已经招到人，也别给不存在的员工派活）。',
     ].filter((section) => section !== '').join('\n\n')
   }
 
@@ -244,7 +256,7 @@ export class CompanyService {
       `## 项目团队\n${team === '' ? '（暂无）' : team}`,
       `## 项目未完成任务\n${openTasks === '' ? '（无）' : openTasks}`,
       `## 项目档案\n${docs === '' ? '（暂无）' : docs}`,
-      '## 你的两条职责：1）用户在本群说的话 = 对该项目下指令，拆活、用 company_dispatch 派给团队成员、跟踪到出结果；2）收到【下属汇报】/【播报任务】通知时，**只输出简报正文**（先结论后细节，markdown）：不要复述指令、不要评论、不要打招呼、不要加「收到」之类的回应、不要调用工具——你的整条回复就是给董事会看的那份简报。',
+      '## 边界：只执行董事会当次的明确指令——不要凭旧计划自动派活。\n## 你的两条职责：1）用户在本群说的话 = 对该项目下指令，拆活、用 company_dispatch 派给团队成员、跟踪到出结果；2）收到【下属汇报】/【播报任务】通知时，**只输出简报正文**（先结论后细节，markdown）：不要复述指令、不要评论、不要打招呼、不要加「收到」之类的回应、不要调用工具——你的整条回复就是给董事会看的那份简报。',
     ].filter((section) => section !== '').join('\n\n')
   }
 
@@ -303,7 +315,8 @@ export class CompanyService {
       cwd: employeeDir(this.deps.paths, id),
       provisionedAt: null,
       status: 'active',
-      permissions: { ...DEFAULT_PERMISSIONS, ...(input.permissions ?? {}) },
+      // 新员工默认无派活/建任务/自我排程权（工作只由董事会分发）
+      permissions: { ...DEFAULT_PERMISSIONS, canDispatch: false, ...(input.permissions ?? {}) },
       dailyTokenCap: input.dailyTokenCap ?? this.deps.config.defaultDailyTokenCap,
       createdAt: now,
       updatedAt: now,
@@ -532,6 +545,13 @@ export class CompanyService {
    * @param input - 任务输入。
    */
   async createTask(creator: Actor, input: TaskInput): Promise<ActionResult<TaskRecord>> {
+    if (!this.mayDispatch(creator)) {
+      return {
+        ok: false,
+        code: 'no_dispatch_permission',
+        message: '工作由董事会分发：你不能自己建任务（也不能给别人建）。把建议写进 company_report（做了什么/建议做什么/为什么），等董事会派发。',
+      }
+    }
     const title = input.title.trim()
     if (title === '') return { ok: false, code: 'invalid_title', message: '任务标题不能为空' }
     if (input.assigneeId != null && this.agent(input.assigneeId) === undefined) {
@@ -667,6 +687,8 @@ export class CompanyService {
       id: `apv_${randomUUID().slice(0, 8)}`,
       kind: input.kind,
       title: input.title,
+      ask: (input.ask ?? '').trim(),
+      summary: (input.summary ?? '').trim(),
       detail: input.detail,
       requesterType: requester.type,
       requesterId: requester.id,
@@ -943,6 +965,13 @@ export class CompanyService {
    * @param input - 员工、种类、规格与提示词。
    */
   async createSchedule(actor: Actor, input: ScheduleInput): Promise<ActionResult<ScheduleRecord>> {
+    if (actor.type === 'agent' && !this.mayDispatch(actor)) {
+      return {
+        ok: false,
+        code: 'no_schedule_permission',
+        message: '例行工作也要董事会定：不要自己排程。把「建议的周期性工作 + 周期 + 理由」写进 company_report，董事会会在面板「排程」页建。',
+      }
+    }
     const agent = this.agent(input.agentId)
     if (agent === undefined) return { ok: false, code: 'unknown_agent', message: `员工 ${input.agentId} 不存在` }
     const parsed = parseSchedule(input, this.deps.config.timeZone)
@@ -1244,6 +1273,7 @@ export class CompanyService {
       `## 你当前的任务\n${openTasks === '' ? '（暂无待办任务）' : openTasks}`,
       [
         '## 工作纪律（必须遵守）',
+        '0. **工作只由董事会分发**：你只做派到你名下的任务。不要自己建任务、不要给同事派活、不要给自己排程；手上没活就待命。想推进别的事 → 写进 `company_report` 的建议（做什么 / 为什么值得做 / 预期产出），由董事会决定派给谁。',
         '1. 一切对外沟通都走公司信箱：问同事用 `company_mail_send`，汇报用 `company_report`（它会自动落到你的上级/项目群）。不要假设对方在线。',
         '2. 领到任务先 `company_task_update`（checkout=true）认领；完成后置 status=review 并 `company_report` 汇报——简报由 CEO 转呈董事会。',
         '3. 需要花钱、上线、删数据、招人等越权动作，先 `company_approval_request`，等 `approval_result` 回来再动手。',
@@ -1468,7 +1498,7 @@ export class CompanyService {
       cwd,
       provisionedAt: null,
       status: 'active',
-      permissions: { projects: { '*': 'write' }, tools: [], canHire: false, canApprove: true },
+      permissions: { projects: { '*': 'write' }, tools: [], canHire: false, canApprove: true, canDispatch: true },
       dailyTokenCap: null,
       createdAt: now,
       updatedAt: now,

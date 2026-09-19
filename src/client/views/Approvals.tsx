@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import type { ApprovalRecord, CompanyState } from '../../shared/wire.ts'
 import type { PanelStore } from '../store.ts'
 import { fmtTime } from '../store.ts'
-import { Btn, Card, Empty, Md, Pill, SectionTitle } from '../ui.tsx'
+import { Btn, Card, Empty, Expandable, Md, Pill, SectionTitle } from '../ui.tsx'
 
 const KIND_LABEL: Record<string, string> = {
   hire: '招聘', spend: '花费', strategy: '策略/上线', danger: '高危操作', other: '其他',
@@ -22,7 +22,23 @@ function ApprovalRow(props: { record: ApprovalRecord; state: CompanyState; store
       <div className="oc-stat__hint" style={{ marginBottom: 8 }}>
         {record.requesterName} · {fmtTime(record.createdAt, props.state.now)} · {record.id}
       </div>
-      <div style={{ marginBottom: 12 }}><Md text={record.detail} /></div>
+      {/* 面向董事会：先看「要我决定什么」，再看三行摘要，技术细节折叠 */}
+      {record.ask !== '' && (
+        <div className="oc-ask">
+          <span className="oc-ask__label">要我决定</span>
+          <span className="oc-ask__text">{record.ask}</span>
+        </div>
+      )}
+      {record.summary !== '' && <div className="oc-summary"><Md text={record.summary} /></div>}
+      {(record.detail !== '' && (record.ask !== '' || record.summary !== '')) && (
+        <div style={{ marginBottom: 12 }}>
+          <div className="oc-stat__hint" style={{ marginBottom: 4 }}>技术细节（想看再展开）</div>
+          <Expandable text={record.detail} collapsedLines={3} />
+        </div>
+      )}
+      {(record.ask === '' && record.summary === '') && (
+        <div style={{ marginBottom: 12 }}><Md text={record.detail} /></div>
+      )}
       {record.status === 'pending'
         ? (
           <>

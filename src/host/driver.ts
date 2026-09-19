@@ -6,7 +6,7 @@
  * v2 变化：
  * - 组合时默认挂载部署 preset（缺省 `standard`），员工因此拥有 bash/fs/子代理等
  *   全套能力（v1 未挂载导致员工「无 shell」的教训）；
- * - 创建/恢复后固定会话标题（「陆遥 · 工位」「项目名 · 项目群」「一人公司 · 大厅」）；
+ * - 创建/恢复后固定会话标题（「姓名 · 职位」「项目名 · 项目群」「一人公司 · 大厅」）；
  * - 频道 agent（项目群）与大厅（CEO 工位）与员工共用同一套驻留与投递机制。
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -86,7 +86,7 @@ export class AgentDriver {
       meta: { cwd: record.cwd, ...(record.presetId !== null ? { agentPreset: record.presetId } : {}) },
       options: this.optionsOf(record),
       compose: (agentCtx) => this.composeWith(agentCtx, spec),
-      title: record.role === 'ceo' ? '一人公司 · 大厅' : `${record.name} · 工位`,
+      title: record.role === 'ceo' ? '一人公司 · 大厅' : `${record.name} · ${record.title}`,
       onCreated: async () => this.deps.markProvisioned(record.id),
       kickoff: this.deps.kickoff?.(record.role === 'ceo' ? 'hall' : 'employee', record.name),
     })
@@ -152,12 +152,12 @@ export class AgentDriver {
       const key = record.id
       const resident = this.residents.get(key)
       if (resident !== undefined) {
-        this.renameTitle(resident.handle.agent, record.role === 'ceo' ? '一人公司 · 大厅' : `${record.name} · 工位`)
+        this.renameTitle(resident.handle.agent, record.role === 'ceo' ? '一人公司 · 大厅' : `${record.name} · ${record.title}`)
         continue
       }
       try {
         const agent = await this.ensure(record)
-        this.renameTitle(agent, record.role === 'ceo' ? '一人公司 · 大厅' : `${record.name} · 工位`)
+        this.renameTitle(agent, record.role === 'ceo' ? '一人公司 · 大厅' : `${record.name} · ${record.title}`)
         await this.stop(key)
       } catch (error) {
         this.deps.log(`标题归位失败（${record.name}）：${describe(error)}`)

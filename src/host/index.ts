@@ -85,7 +85,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   /** 会话对应的展示标题（大厅/项目群/员工工位）。 */
   const titleForSession = (sessionId: string): string | undefined => {
     const record = service.agents().find((entry) => entry.sessionId === sessionId)
-    if (record !== undefined) return record.role === 'ceo' ? '一人公司' : `${record.name} · 工位`
+    if (record !== undefined) return record.role === 'ceo' ? '一人公司' : `${record.name} · ${record.title}`
     const project = service.projects().find((entry) => entry.channelSessionId === sessionId)
     return project === undefined ? undefined : `${project.name} · 项目群`
   }
