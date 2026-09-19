@@ -1,0 +1,13 @@
+# 依赖与产物
+node_modules/
+*.log
+.DS_Store
+
+# 我的公司配置（含真实仓库路径/服务器信息，留在本地，不进公开仓库）
+agents/agt_pulse.md
+agents/agt_desic.md
+scripts/seed-company.mjs
+scripts/register-hires.mjs
+
+# sourcemap（本地调试用，不入库）
+lib/*.map

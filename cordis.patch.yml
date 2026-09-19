@@ -1,0 +1,18 @@
+# dsh-onecompany 组合包补丁：作为 bundle 被 `dsh plugin add` 安装时插入插件行。
+# host 半 = 包默认导出；client 半 = package.json 的 dsh.client 标记（宿主自动扫描下发）。
+- insert:
+    - id: onecompany
+      name: dsh-onecompany
+      config:
+        # 公司根目录（员工 cwd / 资料库 / 项目文件）。留空 = $DSH_HOME/company。
+        companyRoot: ''
+        # 调度器/信箱 tick 毫秒。
+        tickMs: 30000
+        # 常驻员工 agent 上限（超出按最久空闲回收句柄，会话仍在盘上）。
+        maxResidentAgents: 8
+        # 员工默认每日 token 预算（input+cacheRead+cacheWrite+output）。
+        defaultDailyTokenCap: 5000000
+        # 需要董事会（用户）审批的动作类别。
+        approvalsRequired: [hire, spend, strategy, danger]
+        # 定时任务默认时区（IANA）。
+        timeZone: Asia/Shanghai

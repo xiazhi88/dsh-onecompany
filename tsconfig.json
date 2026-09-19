@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noImplicitAny": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@deepseek-ai/cordis": ["./node_modules/@deepseek-ai/cordis"],
+      "@deepseek-ai/dsh-agent": ["./node_modules/@deepseek-ai/dsh-agent"],
+      "@deepseek-ai/dsh-tools": ["./node_modules/@deepseek-ai/dsh-tools"],
+      "@deepseek-ai/dsh-llm": ["./node_modules/@deepseek-ai/dsh-llm"],
+      "@deepseek-ai/dsh-session": ["./node_modules/@deepseek-ai/dsh-session"],
+      "@deepseek-ai/dsh-storage-domain": ["./node_modules/@deepseek-ai/dsh-storage-domain"],
+      "@deepseek-ai/dsh-commands": ["./node_modules/@deepseek-ai/dsh-commands"],
+      "@deepseek-ai/dsh-system-prompt": ["./node_modules/@deepseek-ai/dsh-system-prompt"],
+      "@deepseek-ai/dsh-agent-presets": ["./node_modules/@deepseek-ai/dsh-agent-presets"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}
