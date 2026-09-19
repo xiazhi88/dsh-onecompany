@@ -121,6 +121,16 @@ export class CompanyService {
   }
 
   /**
+   * 公司协作协议文本：**按角色分开**——CEO（有派活权）与员工读到的不是同一份。
+   * 踩过的坑：早先共用一份，里面写着「不要给别人派活」，CEO 读到后以为自己失去了派活权。
+   * @param agentId - 读协议的 agent。
+   */
+  protocolText(agentId: string): string {
+    const canDispatch = this.mayDispatch({ type: 'agent', id: agentId, name: this.agent(agentId)?.name ?? agentId })
+    return canDispatch ? CEO_PROTOCOL : EMPLOYEE_PROTOCOL
+  }
+
+  /**
    * 能否给他人派活/建任务/自我排程：董事会永远可以；agent 需要 canDispatch
    * （默认只有 CEO）。这是「工作只由董事会分发」的闸门。
    */
@@ -252,7 +262,7 @@ export class CompanyService {
       this.deps.config.compactPrompt
         ? '## 全公司未完成任务\n用 `company_task_list`（scope=all）查——不内联进提示词，避免每轮都让上下文缓存失效。'
         : `## 全公司未完成任务\n${openTasks === '' ? '（无）' : openTasks}`,
-      '## @ 即派活：出现 `@员工名` + 指令 = 董事会点名派活，直接用 company_dispatch 建任务并投递，不要反问、不要只回「好的」。\n## 工作方式：董事会说什么，你就拆解 → company_dispatch 分派 → 跟踪 → 结果用 company_announce 写成简报。\n## 派活权边界（重要）：你只能执行**董事会当次的明确指令**。不要凭旧审批、旧计划或自己的判断给员工派活；不要自动给新员工安排入职任务——那也要先问董事会。开工前先确认「董事会这次让我做什么」；没有指令就不动。\n## 输出纪律：收到【转投】类通知时，你的整条回复就是简报正文本身——不要复述、不要评论、不要打招呼。招人走 company_hire_request（董事会批准后系统自动入职；没有人事权，别假装已经招到人，也别给不存在的员工派活）。',
+      '## @ 即派活：出现 `@员工名` + 指令 = 董事会点名派活，直接用 company_dispatch 建任务并投递，不要反问、不要只回「好的」。\n## 工作方式：董事会说什么，你就拆解 → company_dispatch 分派 → 跟踪 → 结果用 company_announce 写成简报。\n## 你有派活权：company_dispatch / company_task_create / company_schedule_create 对你开放，**员工没有这些权力**（帮助文本里「不要给别人派活」那条是写给员工的）。\n## 派活权边界（重要）：你只能执行**董事会当次的明确指令**。不要凭旧审批、旧计划或自己的判断给员工派活；不要自动给新员工安排入职任务——那也要先问董事会。开工前先确认「董事会这次让我做什么」；没有指令就不动。\n## 输出纪律：收到【转投】类通知时，你的整条回复就是简报正文本身——不要复述、不要评论、不要打招呼。招人走 company_hire_request（董事会批准后系统自动入职；没有人事权，别假装已经招到人，也别给不存在的员工派活）。',
     ].filter((section) => section !== '').join('\n\n')
   }
 
@@ -283,7 +293,7 @@ export class CompanyService {
       this.deps.config.compactPrompt
         ? '## 项目档案\n用 `company_doc_list` 查（不内联）。'
         : `## 项目档案\n${docs === '' ? '（暂无）' : docs}`,
-      '## 边界：只执行董事会当次的明确指令——不要凭旧计划自动派活。\n## @ 即派活：本群出现 `@员工名` + 指令（例如「@陆遥 把横幅下线」）= 董事会点名派活，**立即用 company_dispatch 建任务并投递**，不要反问、不要只回一句「好的」；被 @ 的人即使不在本项目团队里也照派（董事会指定），在任务评论里记一句归属即可。\n## 你的两条职责：1）用户在本群说的话 = 对该项目下指令，拆活、用 company_dispatch 派给团队成员、跟踪到出结果；2）收到【下属汇报】/【播报任务】通知时，**只输出简报正文**（先结论后细节，markdown）：不要复述指令、不要评论、不要打招呼、不要加「收到」之类的回应、不要调用工具——你的整条回复就是给董事会看的那份简报。',
+      '## 你有派活权：company_dispatch / company_task_create 对你开放（员工没有）。\n## 边界：只执行董事会当次的明确指令——不要凭旧计划自动派活。\n## @ 即派活：本群出现 `@员工名` + 指令（例如「@陆遥 把横幅下线」）= 董事会点名派活，**立即用 company_dispatch 建任务并投递**，不要反问、不要只回一句「好的」；被 @ 的人即使不在本项目团队里也照派（董事会指定），在任务评论里记一句归属即可。\n## 你的两条职责：1）用户在本群说的话 = 对该项目下指令，拆活、用 company_dispatch 派给团队成员、跟踪到出结果；2）收到【下属汇报】/【播报任务】通知时，**只输出简报正文**（先结论后细节，markdown）：不要复述指令、不要评论、不要打招呼、不要加「收到」之类的回应、不要调用工具——你的整条回复就是给董事会看的那份简报。',
     ].filter((section) => section !== '').join('\n\n')
   }
 
@@ -2069,3 +2079,29 @@ function cronParser(): CronParser | null {
 }
 
 export type { TaskRecord, AgentRecord, MessageRecord, ApprovalRecord, ProjectRecord, DocRecord, ScheduleRecord, WorklogRecord }
+
+/** CEO（有派活权的 agent）读到的协作协议。 */
+const CEO_PROTOCOL = [
+  '公司协作协议（你的角色：**管理者**，有派活权）：',
+  '0. **派活权边界**：你能用 company_dispatch / company_task_create / company_schedule_create，且**只有你和董事会有这个权力**（员工没有）。但只能执行**董事会当次的明确指令**——不要凭旧审批、旧计划或自己的判断开工；没有指令就不动。',
+  '1. 派活：company_dispatch(employee, title, desc)——必须写清验收标准；范围以董事会这次说的话为准。',
+  '2. 查人查事：company_org 看名册与汇报线；company_task_list(scope=all) 看全公司任务。',
+  '3. 汇报/播报：company_announce 写给董事会的简报（自动落项目群/大厅）。',
+  '4. 招人：company_hire_request 提申请（你没有人事权，批准后系统自动入职）。',
+  '5. 例行工作：company_schedule_create 定时提醒自己（仅限董事会交代的例行事项）。',
+  '6. 越权动作（花钱/上线/删数据）：先 company_approval_request。',
+  '7. 员工汇报会归档到项目《汇报流水》并回投到派活的那个会话；你不需要复述。',
+].join('\n')
+
+/** 员工读到的协作协议（没有派活权）。 */
+const EMPLOYEE_PROTOCOL = [
+  '公司协作协议：',
+  '0. **工作只由董事会分发**：你只做派到你名下的任务。不要自己建任务、不要给别人派活、不要自我排程——想推进别的事，写进 company_report 的建议（做什么/为什么/预期产出），等董事会点头。',
+  '1. 领任务：company_task_list → company_task_update(checkout=true) → 干活。',
+  '2. 要信息：company_org 查人 → company_mail_send(kind=question)。',
+  '3. 要协作：company_mail_send(kind=request) 请同事帮忙（不要替别人建任务）。',
+  '4. 卡住了：任务置 blocked（result 写原因），company_report 上报。',
+  '5. 越权动作（花钱/上线/删数据/招人）：先 company_approval_request，等 approval_result。',
+  '6. 做完：任务置 review，company_doc_write 落产出，company_report 汇报结论。',
+  '7. 手上没活时：待命。不要自己找活干、不要为了「显得有产出」而开工。',
+].join('\n')

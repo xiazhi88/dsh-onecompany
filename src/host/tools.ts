@@ -316,7 +316,7 @@ export function buildCompanyTools(service: CompanyService, agentId: string): Too
       description: '公司协作协议速查：什么时候用哪个工具、汇报与审批规则。不确定流程时调用。',
       parameters: {},
       output: textOutput,
-      execute: () => perform(async () => ({ ok: true, data: HELP_TEXT })),
+      execute: () => perform(async () => ({ ok: true, data: service.protocolText(agentId) })),
     }),
   ]
   if (!canDispatch) {
@@ -325,18 +325,6 @@ export function buildCompanyTools(service: CompanyService, agentId: string): Too
   }
   return tools
 }
-
-const HELP_TEXT = [
-  '公司协作协议：',
-  '0. **工作只由董事会分发**：你只做派到你名下的任务。不要自己建任务、不要给别人派活、不要自我排程——想推进别的事，写进 company_report 的建议（做什么/为什么/预期产出），等董事会点头。',
-  '1. 领任务：company_task_list → company_task_update(checkout=true) → 干活。',
-  '2. 要信息：company_org 查人 → company_mail_send(kind=question)。',
-  '3. 要协作：company_mail_send(kind=request) 请同事帮忙（对方是否接、什么时候接由对方与董事会决定；不要替别人建任务）。',
-  '4. 卡住了：任务置 blocked（result 写原因），company_report 上报。',
-  '5. 越权动作（花钱/上线/删数据/招人）：先 company_approval_request，等 approval_result。',
-  '6. 做完：任务置 review，company_doc_write 落产出，company_report 汇报结论。',
-  '7. 手上没活时：待命。不要自己找活干、不要为了"显得有产出"而开工。',
-].join('\n')
 
 // ───────────────────────────── CEO / 频道 / 全局工具 ─────────────────────────────
 
