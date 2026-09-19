@@ -83,8 +83,36 @@ export function buildCompanyTools(service: CompanyService, agentId: string): Too
         const list = service.messages({ toId: agentId })
           .filter((record) => args.unread_only !== true || record.status !== 'read')
           .slice(0, limit)
-          .map((record) => `[${record.status}] ${record.id} ← ${record.fromName}（${record.kind}）：${record.body.slice(0, 200)}`)
-        return { ok: true, data: list.length === 0 ? '（信箱为空）' : list.join('\n') }
+          .map((record) => `[${record.status}] ${record.id} ← ${record.fromName}（${record.kind}）：${record.body.slice(0, 160)}`)
+        return {
+          ok: true,
+          data: list.length === 0
+            ? '（信箱为空）'
+            : `${list.join('\n')}\n\n提示：正文被摘要截断时，用 company_mail_read(mail_id) 读全文（不要去翻磁盘）。`,
+        }
+      }),
+    }),
+
+    defineTool({
+      name: 'company_mail_read',
+      description: '按 mail_id 读一封信箱消息的完整正文（列表里的摘要是截断的）。',
+      parameters: {
+        mail_id: { type: 'string', required: true, description: 'company_mail_list 给出的消息 ID' },
+      },
+      output: textOutput,
+      execute: (args) => perform(async () => {
+        const result = await service.readMail(args.mail_id)
+        if (!result.ok || result.data === undefined) return result
+        const message = result.data
+        return {
+          ok: true,
+          data: [
+            `来自：${message.fromName}（${message.fromType}）· 类型：${message.kind} · ${new Date(message.createdAt).toISOString()}`,
+            ...(message.taskId === null ? [] : [`关联任务：${message.taskId}`]),
+            '---',
+            message.body,
+          ].join('\n'),
+        }
       }),
     }),
 

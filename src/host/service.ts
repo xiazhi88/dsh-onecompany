@@ -395,6 +395,16 @@ export class CompanyService {
     return { ok: true, data: record }
   }
 
+  /**
+   * 读一封信箱消息的完整正文（信箱列表只给摘要，避免 CEO 为了看全文去翻磁盘）。
+   * @param id - 消息 id。
+   */
+  async readMail(id: string): Promise<ActionResult<MessageRecord>> {
+    const record = this.deps.domain.table('messages').get(id)
+    if (record === undefined) return { ok: false, code: 'unknown_message', message: `消息 ${id} 不存在` }
+    return { ok: true, data: record }
+  }
+
   /** 标记消息已读。 */
   async markRead(id: string): Promise<ActionResult<MessageRecord>> {
     const record = this.deps.domain.table('messages').get(id)
@@ -436,6 +446,12 @@ export class CompanyService {
           this.lastError = describe(error)
           this.deps.log(`投递消息 ${record.id} 到项目群 ${project.name} 失败：${this.lastError}`)
         }
+        continue
+      }
+      // 兜底：任何「自己发给自己」的消息都不投递（避免自唤醒回声环）
+      if (record.fromType === 'agent' && record.fromId === record.toId) {
+        await this.deps.domain.table('messages').put(record.id, { ...record, status: 'read' })
+        await this.log(SYSTEM, 'mail.self-skip', `跳过自投递（${record.fromName} → 自己）`)
         continue
       }
       const recipient = this.agent(record.toId)
@@ -1210,6 +1226,8 @@ export class CompanyService {
       }
     }
     if (toId === null) toId = this.ceo()?.id ?? 'board'
+    // 自环防护：CEO 自己的汇报不能回投给自己（否则每轮都会自我唤醒）
+    if (toId === actor.id) toId = 'board'
     return this.sendMail(actor, { toId, kind: 'report', body, taskId })
   }
 
@@ -1221,7 +1239,10 @@ export class CompanyService {
    */
   async announce(actor: Actor, projectId: string | null, text: string): Promise<ActionResult<MessageRecord>> {
     const ceo = this.ceo()
-    const toId = projectId ?? ceo?.id ?? 'board'
+    const target = projectId ?? ceo?.id ?? 'board'
+    // CEO 对大厅「播报」= 就是它自己所在会话：不给自己发信（会自唤醒成回声），
+    // 改为入董事会信箱留档；它当前这轮的输出本身就已经落在大厅。
+    const toId = target === actor.id ? 'board' : target
     return this.sendMail(actor, { toId, kind: 'announce', body: text })
   }
 
