@@ -110,6 +110,30 @@ function TaskDrawer(props: { state: CompanyState; store: PanelStore; task: TaskR
         )}
 
         <div className="oc-row oc-row--wrap" style={{ gap: 6, marginBottom: 14 }}>
+          {task.sessionId !== null && (
+            <Btn
+              size="sm"
+              onClick={() => {
+                const agent = state.agents.find((record) => record.id === task.assigneeId)
+                store.openSession(task.sessionId!, agent?.cwd)
+              }}
+              title="在原生聊天里打开这个任务的一次性执行会话"
+            >
+              打开执行会话
+            </Btn>
+          )}
+          {task.sessionId === null && task.assigneeId !== null && (
+            <Btn
+              size="sm"
+              onClick={() => {
+                const agent = state.agents.find((record) => record.id === task.assigneeId)
+                if (agent !== undefined) store.openSession(agent.sessionId, agent.cwd)
+              }}
+              title="这条任务没有独立执行会话（常驻工位模式或旧任务）"
+            >
+              打开工位
+            </Btn>
+          )}
           {task.status !== 'in_progress' && <Btn size="sm" onClick={() => { void store.act('认领', (api) => api.updateTaskRemote(task.id, { checkout: true })) }}>认领并开工</Btn>}
           {task.status !== 'review' && task.status !== 'done' && <Btn size="sm" variant="primary" onClick={() => move('review')}>提交验收</Btn>}
           {task.status !== 'done' && <Btn size="sm" onClick={() => move('done')}>标记完成</Btn>}

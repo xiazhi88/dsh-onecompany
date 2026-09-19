@@ -13,7 +13,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import type { AgentRecord, ProjectRecord } from '../shared/wire.ts'
+import type { AgentRecord, ProjectRecord, TaskRecord } from '../shared/wire.ts'
 
 /** 组合一个 agent 作用域所需的输入。 */
 export interface ComposeSpec {
@@ -35,6 +35,8 @@ export interface DriverDeps {
   composeEmployee: (record: AgentRecord) => ComposeSpec
   /** 项目群频道组合。 */
   composeChannel: (project: ProjectRecord) => ComposeSpec
+  /** 一次性任务会话的组合（岗位说明书 + 任务 + 档案索引）。 */
+  composeTask: (task: TaskRecord, employee: AgentRecord) => ComposeSpec
   /** 大厅（CEO 工位）组合。 */
   composeHall: (record: AgentRecord) => ComposeSpec
   /** 首次创建成功后回写名册（下一次唤醒走 resume）。 */
@@ -123,6 +125,31 @@ export class AgentDriver {
   async deliver(record: AgentRecord, text: string, notice?: string): Promise<void> {
     const agent = await this.ensure(record)
     agent.followup(this.message(text, notice))
+  }
+
+  /**
+   * 一次性任务会话：每个任务一个会话，key = `task:<id>`。
+   * sessionId 由服务在建任务时生成；首次调用会因「会话不存在」回落到创建。
+   */
+  async ensureTask(task: TaskRecord, employee: AgentRecord): Promise<Agent> {
+    const sessionId = task.sessionId ?? `ses_${crypto.randomUUID()}`
+    return this.ensureKeyed(`task:${task.id}`, sessionId, true, {
+      meta: { cwd: employee.cwd, ...(employee.presetId === null ? {} : { agentPreset: employee.presetId }) },
+      options: this.optionsOf(employee),
+      compose: (agentCtx) => this.composeWith(agentCtx, this.deps.composeTask(task, employee)),
+      title: `${task.id} · ${task.title.slice(0, 24)}`,
+    })
+  }
+
+  /** 把任务帧投进它的执行会话。 */
+  async deliverTask(task: TaskRecord, employee: AgentRecord, text: string): Promise<void> {
+    const agent = await this.ensureTask(task, employee)
+    agent.followup(this.message(text))
+  }
+
+  /** 停止某任务的执行会话（会话保留、可 resume）。 */
+  async stopTask(taskId: string): Promise<void> {
+    await this.stop(`task:${taskId}`)
   }
 
   /** 投递到项目群频道。 */

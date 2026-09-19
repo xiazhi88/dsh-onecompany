@@ -12,7 +12,7 @@ import { buildCeoExtras, buildChannelTools, buildCompanyTools } from './tools.ts
 import { registerCallCommand, registerCompanyCommand } from './commands.ts'
 import { installRootInjector } from './injector.ts'
 import { ensurePaths, resolveRoot } from './paths.ts'
-import type { AgentRecord, ProjectRecord } from '../shared/wire.ts'
+import type { AgentRecord, ProjectRecord, TaskRecord } from '../shared/wire.ts'
 
 export const name = 'onecompany'
 
@@ -36,6 +36,14 @@ export interface Config {
   kickoffOnCreate: boolean
   /** 员工工位是否也发开场消息（默认否：员工只在被派活时醒来）。 */
   employeeKickoff: boolean
+  /**
+   * 执行会话形态：
+   * - `per-task`（默认）每个任务开一个新会话，跑完即停（上下文小、按任务隔离、缓存友好）
+   * - `resident`   沿用常驻工位会话（有连续性，但上下文随会话年龄增长、且会互相污染）
+   */
+  taskSession: 'per-task' | 'resident'
+  /** 任务执行会话的超时小时数：超过就停止会话并在任务里留言（0 = 不超时）。 */
+  taskSessionTimeoutHours: number
   /** 是否给公司 agent 收窄工具面（禁掉与工作无关的宿主工具）。 */
   leanTools: boolean
   /**
@@ -69,6 +77,8 @@ export const Config: Schema<Config> = Schema.object({
   autoProvision: Schema.boolean().default(true),
   kickoffOnCreate: Schema.boolean().default(true),
   employeeKickoff: Schema.boolean().default(false),
+  taskSession: Schema.union(['per-task', 'resident']).default('per-task'),
+  taskSessionTimeoutHours: Schema.number().default(12),
   leanTools: Schema.boolean().default(true),
   compactPrompt: Schema.boolean().default(true),
   deniedTools: Schema.array(Schema.string()).default([
@@ -172,10 +182,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       companyName: config.companyName,
       reportDelivery: config.reportDelivery,
       compactPrompt: config.compactPrompt,
+      taskSession: config.taskSession,
+      taskSessionTimeoutHours: config.taskSessionTimeoutHours,
     },
     deliver: async (record, text, notice) => {
       if (driver === undefined) throw new Error('员工驱动尚未就绪')
       await driver.deliver(record, text, notice)
+    },
+    deliverTask: async (task, employee, text) => {
+      if (driver === undefined) throw new Error('员工驱动尚未就绪')
+      await driver.deliverTask(task, employee, text)
+    },
+    stopTask: async (taskId) => {
+      if (driver === undefined) return
+      await driver.stopTask(taskId)
     },
     deliverChannel: async (project, text, notice) => {
       if (driver === undefined) throw new Error('员工驱动尚未就绪')
@@ -219,6 +239,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     prompt: () => service.channelPrompt(project.id),
     presetId: null,
   })
+  const composeTask = (task: TaskRecord, employee: AgentRecord): ComposeSpec => ({
+    kind: 'employee',
+    tools: buildCompanyTools(service, employee.id),
+    prompt: () => service.taskPrompt(task.id, employee.id),
+    presetId: employee.presetId,
+  })
+
   const composeHall = (record: AgentRecord): ComposeSpec => ({
     kind: 'hall',
     tools: [...buildCompanyTools(service, record.id), ...buildCeoExtras(service, record.id)],
@@ -259,6 +286,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     ctx,
     composeEmployee,
     composeChannel,
+    composeTask,
     composeHall,
     markProvisioned: async (agentId) => {
       await service.markProvisioned(agentId)

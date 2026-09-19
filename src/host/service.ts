@@ -47,11 +47,19 @@ export interface ServiceDeps {
     reportDelivery: 'digest' | 'record'
     /** 精简提示词：不把动态清单塞进系统提示词（保前缀缓存）。 */
     compactPrompt: boolean
+    /** 执行会话形态：per-task 每个任务一个会话；resident 常驻工位。 */
+    taskSession: 'per-task' | 'resident'
+    /** 任务执行会话超时小时数（0 = 不超时）。 */
+    taskSessionTimeoutHours: number
   }
   /** 向某员工的会话投递一条消息。 */
   deliver: (record: AgentRecord, text: string, notice?: string) => Promise<void>
   /** 向某项目群频道投递一条消息。 */
   deliverChannel: (project: ProjectRecord, text: string, notice?: string) => Promise<void>
+  /** 向某任务的执行会话投递一条消息（per-task 模式）。 */
+  deliverTask: (task: TaskRecord, employee: AgentRecord, text: string) => Promise<void>
+  /** 停止某任务的执行会话（会话保留、可 resume）。 */
+  stopTask: (taskId: string) => Promise<void>
   /** 预热大厅与项目群会话（reconcile 用；仅启用时调用）。 */
   warmChannels: () => Promise<void>
   /** 把已存在员工会话的标题归位为「姓名 · 职位」。 */
@@ -174,6 +182,7 @@ export class CompanyService {
     try {
       const schedules = await this.fireDueSchedules()
       const delivered = await this.deliverPending()
+      await this.sweepTaskSessions()
       this.lastError = null
       return { schedules, delivered }
     } catch (error) {
@@ -580,17 +589,40 @@ export class CompanyService {
       priority: input.priority ?? 0,
       dueAt: input.dueAt ?? null,
       checkoutBy: null, checkoutAt: null, result: null,
+      sessionId: this.deps.config.taskSession === 'per-task' && input.assigneeId != null ? `ses_${randomUUID()}` : null,
       createdAt: now, updatedAt: now, doneAt: null,
     }
     await this.deps.domain.table('tasks').put(id, record)
     await this.log(creator, 'task.create', `任务「${title}」→ ${this.assigneeName(record)}`)
+
     if (record.assigneeId !== null) {
-      await this.sendMail(creator.type === 'agent' ? creator : BOARD, {
-        toId: record.assigneeId,
-        kind: 'task_notice',
-        body: renderTaskDispatch(record, this),
-        taskId: id,
-      })
+      const frame = renderTaskDispatch(record, this)
+      const assignee = this.agent(record.assigneeId)
+      if (this.deps.config.taskSession === 'per-task' && assignee !== undefined && record.sessionId !== null) {
+        // 一次性执行会话：每任务一个会话，跑完即停。留一条已投递的信箱记录便于审计/面板查看。
+        const mail: MessageRecord = {
+          id: `msg_${randomUUID().slice(0, 8)}`,
+          fromType: creator.type, fromId: creator.id, fromName: creator.name,
+          toType: 'agent', toId: record.assigneeId, kind: 'task_notice', taskId: id,
+          body: frame, status: 'delivered', createdAt: now, deliveredAt: now,
+        }
+        await this.deps.domain.table('messages').put(mail.id, mail)
+        try {
+          await this.deps.deliverTask(record, assignee, frame)
+        } catch (error) {
+          const message = describe(error)
+          this.lastError = `任务会话创建失败：${message}`
+          this.deps.log(`任务 ${id} 的执行会话创建失败：${message}`)
+          await this.deps.domain.table('messages').put(mail.id, { ...mail, status: 'pending', deliveredAt: null })
+        }
+      } else {
+        await this.sendMail(creator.type === 'agent' ? creator : BOARD, {
+          toId: record.assigneeId,
+          kind: 'task_notice',
+          body: frame,
+          taskId: id,
+        })
+      }
     }
     return { ok: true, data: record }
   }
@@ -632,6 +664,15 @@ export class CompanyService {
     }
     await this.deps.domain.table('tasks').put(id, next)
     await this.log(actor, `task.${patch.status ?? (patch.checkout === true ? 'checkout' : 'update')}`, `任务「${next.title}」`)
+    // 一次性执行会话：任务收尾（review/done/cancelled）后停掉会话，释放常驻位。
+    // 会话本体保留在盘上，董事会随时可以从任务详情重新打开。
+    if (next.sessionId !== null && (next.status === 'done' || next.status === 'cancelled' || next.status === 'review')) {
+      try {
+        await this.deps.stopTask(next.id)
+      } catch (error) {
+        this.deps.log(`停止任务会话失败（${next.id}）：${describe(error)}`)
+      }
+    }
     if (patch.status === 'done') await this.closeParentIfDone(next)
     if (patch.assigneeId !== undefined && patch.assigneeId !== record.assigneeId && patch.assigneeId !== null) {
       await this.sendMail(actor, {
@@ -1296,6 +1337,78 @@ export class CompanyService {
       ].join('\n'),
       `公司根目录：${this.deps.paths.root}`,
     ].filter((section) => section !== '').join('\n\n')
+  }
+
+  /**
+   * 收尾清理：跑太久的任务执行会话停掉（会话保留），并在任务里留一条说明。
+   * 目的是避免「僵尸会话」长期占着常驻位、也让董事会一眼看到哪件事拖住了。
+   */
+  private async sweepTaskSessions(): Promise<void> {
+    const hours = this.deps.config.taskSessionTimeoutHours
+    if (this.deps.config.taskSession !== 'per-task' || hours <= 0) return
+    const now = Date.now()
+    for (const task of this.tasks()) {
+      if (task.sessionId === null || task.status !== 'in_progress') continue
+      const startedAt = task.checkoutAt ?? task.createdAt
+      if (now - startedAt < hours * 3600_000) continue
+      try {
+        await this.deps.stopTask(task.id)
+      } catch (error) {
+        this.deps.log(`超时停止任务会话失败（${task.id}）：${describe(error)}`)
+      }
+      const comment: CommentRecord = {
+        id: `cmt_${randomUUID().slice(0, 8)}`, taskId: task.id,
+        authorType: 'system', authorId: 'system', authorName: '公司调度',
+        text: `执行会话已超时自动停止（超过 ${hours} 小时未收尾）。任务状态保持 ${task.status}；董事会可在任务详情重新打开执行会话，或改派/关闭。`,
+        createdAt: now,
+      }
+      await this.deps.domain.table('comments').put(comment.id, comment)
+      await this.deps.domain.table('tasks').put(task.id, { ...task, updatedAt: now })
+      await this.log(SYSTEM, 'task.session-timeout', `任务「${task.title}」执行会话超时停止（${hours}h）`)
+    }
+  }
+
+  /**
+   * 一次性任务会话的提示词：岗位身份（静态）+ 本任务 + 开工前必读的档案索引 +
+   * 最近讨论 + 交活要求。
+   *
+   * 为什么这么设计：per-task 会话没有历史记忆，**记忆的载体是档案**——所以这里
+   * 只给「要点索引 + 路径」而不是把档案正文塞进来（省 token，且让模型自己按需读）。
+   */
+  taskPrompt(taskId: string, agentId: string): string {
+    const task = this.deps.domain.table('tasks').get(taskId)
+    const employee = this.agent(agentId)
+    if (task === undefined || employee === undefined) return this.employeePrompt(agentId)
+    const project = task.projectId === null ? undefined : this.deps.domain.table('projects').get(task.projectId)
+    const docs = this.docs(task.projectId ?? undefined)
+      .slice(0, 12)
+      .map((doc) => `- 《${doc.title}》 ${doc.path}`)
+      .join('\n')
+    const comments = this.comments(taskId)
+      .slice(-5)
+      .map((comment) => `- ${comment.authorName}：${comment.text.slice(0, 300)}`)
+      .join('\n')
+    return [
+      this.employeePrompt(agentId),
+      [
+        '# 本次任务会话（一次性）',
+        '你在这个会话里只做下面这一件事；做完就收尾，不要顺手做别的、不要给自己或他人另开任务。',
+        '',
+        `## 任务\n${task.title}（${task.id}，状态 ${task.status}，优先级 ${task.priority}）`,
+        task.desc.trim() === '' ? '（董事长/上级没写额外说明，按岗位职责与项目档案判断验收标准，并先写清你的理解）' : `## 任务说明与验收\n${task.desc}`,
+        project === undefined
+          ? '## 项目\n（未关联项目：产出写进公司资料库，汇报用 company_report）'
+          : `## 项目\n${project.name}（${project.id}）${project.repoPath === null ? '' : `\n代码仓库：${project.repoPath}`}\n档案目录：${project.rootPath}`,
+        docs === ''
+          ? '## 开工前必读\n本项目还没有档案；先 `company_doc_list` 看看有什么，再决定要不要建一份交接记录。'
+          : `## 开工前必读（本项目档案，按需 company_doc_read 读全文——不要凭记忆猜）\n${docs}`,
+        comments === '' ? '' : `## 最近讨论\n${comments}`,
+        '## 交活\n1. 完成后 `company_task_update`（status=review，result 写清：改了什么 / 跑了什么验证 / 未完成项与风险）；'
+        + '\n2. 产出落到项目档案（company_doc_write）或仓库文件，别只写在会话里；'
+        + '\n3. `company_report` 汇报结论——它会被归档到项目《汇报流水》，不会打断别人。'
+        + '\n4. 若卡住：status=blocked + result 写清卡点，company_report 上报，然后停下等董事会/上级。',
+      ].join('\n\n'),
+    ].filter((part) => part !== '').join('\n\n')
   }
 
   private assigneeName(record: TaskRecord): string {

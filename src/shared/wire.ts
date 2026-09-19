@@ -83,6 +83,8 @@ export const zTask = z.object({
   priority: z.number(),
   dueAt: z.number().nullable(),
   checkoutBy: z.string().nullable(),
+  /** 一次性执行会话 id（per-task 模式）；null = 尚未创建或走常驻工位。 */
+  sessionId: z.string().nullable().default(null),
   checkoutAt: z.number().nullable(),
   result: z.string().nullable(),
   createdAt: z.number(),

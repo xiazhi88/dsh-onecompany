@@ -50,7 +50,19 @@ function AgentCard(props: {
 
         <div className="oc-row oc-row--wrap" style={{ marginTop: 12, gap: 6 }}>
           <Btn size="sm" variant="primary" onClick={() => props.onNudge(agent)}>派活/私聊</Btn>
-          <Btn size="sm" onClick={() => store.openSession(agent.sessionId, agent.cwd)} title="在原生聊天里打开该员工的工位会话">打开工位</Btn>
+          <Btn
+            size="sm"
+            onClick={() => {
+              if (agent.provisionedAt === null) {
+                store.notify('该员工还没有工位会话：派活后会自动建「任务会话」，或在「派活/私聊」里说一句即可创建。', 'ok')
+                return
+              }
+              store.openSession(agent.sessionId, agent.cwd)
+            }}
+            title="在原生聊天里打开该员工的工位会话（对话面）"
+          >
+            打开工位
+          </Btn>
           <Btn size="sm" onClick={() => props.onDetail(agent)}>工作日志</Btn>
           <Btn size="sm" onClick={() => props.onEdit(agent)}>编辑</Btn>
           <Btn
