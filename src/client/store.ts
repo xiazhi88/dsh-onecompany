@@ -32,6 +32,7 @@ export interface CompanyRemote {
   readDocRemote(docId: string): Promise<{ ok: boolean; title?: string; path?: string; content?: string; code?: string; message?: string }>
   createScheduleRemote(input: ScheduleInput): Promise<Ack>
   deleteSchedule(id: string): Promise<Ack>
+  setScheduleEnabledRemote(id: string, enabled: boolean): Promise<Ack>
 }
 
 type RemoteResult<T> =
@@ -74,6 +75,7 @@ export function companyRemoteOf(value: unknown): CompanyRemote | undefined {
     readDocRemote: (docId) => call<{ ok: boolean; title?: string; path?: string; content?: string; code?: string; message?: string }>('readDocRemote', docId),
     createScheduleRemote: (input) => call<Ack>('createScheduleRemote', input),
     deleteSchedule: (id) => call<Ack>('deleteSchedule', id),
+    setScheduleEnabledRemote: (id, enabled) => call<Ack>('setScheduleEnabledRemote', id, enabled),
   }
 }
 
@@ -96,7 +98,7 @@ export interface PanelState {
   selectedTaskId: string | null
 }
 
-export type ViewId = 'overview' | 'org' | 'tasks' | 'approvals' | 'library' | 'activity'
+export type ViewId = 'overview' | 'org' | 'tasks' | 'schedule' | 'approvals' | 'library' | 'activity'
 
 type Listener = () => void
 

@@ -247,6 +247,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     void attachLiveCompanySessions().catch((error: unknown) => log(`补挂公司会话失败：${describe(error)}`))
   })
 
+  // 领域任何写入都推进快照指纹（客户端据此决定要不要重渲染）。
+  ctx.on('domain/changed', ((change: { domain?: string }) => {
+    if (change?.domain === 'onecompany') service.bumpRevision()
+  }) as never)
+
   registerCompanyCommand(ctx, service, log)
   registerCallCommand(ctx, service, log)
 

@@ -146,6 +146,8 @@ export function NavIcon(props: { view: ViewId }): React.ReactElement {
       return <svg {...common}><rect x="9" y="3" width="6" height="5" rx="1.5" /><rect x="3" y="16" width="6" height="5" rx="1.5" /><rect x="15" y="16" width="6" height="5" rx="1.5" /><path d="M12 8v4M6 16v-4h12v4" /></svg>
     case 'tasks':
       return <svg {...common}><path d="M4 6h16M4 12h16M4 18h10" /><circle cx="19" cy="18" r="2.4" /></svg>
+    case 'schedule':
+      return <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>
     case 'approvals':
       return <svg {...common}><path d="M9 11l2.5 2.5L16 8" /><rect x="3.5" y="3.5" width="17" height="17" rx="3" /></svg>
     case 'library':

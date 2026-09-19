@@ -86,8 +86,18 @@ export class CompanyService {
   private timer: (() => void) | undefined
   private ticking = false
   private lastError: string | null = null
+  /**
+   * 领域写入序号：每次 domain/changed 递增，作为快照指纹的一部分。
+   * 只靠「数量 + 时间戳」会漏掉不改变这两者的写入（例如排程暂停）。
+   */
+  private writeSeq = 0
 
   constructor(private readonly deps: ServiceDeps) {}
+
+  /** 领域写入后由 host 层调用，推进指纹。 */
+  bumpRevision(): void {
+    this.writeSeq += 1
+  }
 
   // ───────────────────────────── 总开关 ─────────────────────────────
 
@@ -957,6 +967,37 @@ export class CompanyService {
     return { ok: true, data: record }
   }
 
+  /**
+   * 暂停/恢复排程。恢复时按当前时间重算下一次触发（避免补跑历史时间点）。
+   * @param id - 排程 id。
+   * @param enabled - true 启用，false 暂停。
+   */
+  async setScheduleEnabled(id: string, enabled: boolean): Promise<ActionResult<ScheduleRecord>> {
+    const record = this.deps.domain.table('schedules').get(id)
+    if (record === undefined) return { ok: false, code: 'unknown_schedule', message: `排程 ${id} 不存在` }
+    if (record.enabled === enabled) return { ok: true, data: record }
+    const now = Date.now()
+    let nextRunAt = record.nextRunAt
+    if (enabled) {
+      if (record.kind === 'every') nextRunAt = now + (record.everySec ?? 0) * 1000
+      else if (record.kind === 'at') {
+        if (record.at === null || record.at <= now) {
+          return { ok: false, code: 'not_future', message: '一次性排程的目标时间已过，请删掉重建' }
+        }
+        nextRunAt = record.at
+      } else nextRunAt = nextCron(record.cron ?? '', now, record.timeZone) ?? Number.MAX_SAFE_INTEGER
+    }
+    const next: ScheduleRecord = { ...record, enabled, nextRunAt, lastOutcome: enabled ? null : record.lastOutcome }
+    await this.deps.domain.table('schedules').put(id, next)
+    await this.log(BOARD, enabled ? 'schedule.enable' : 'schedule.pause', `${this.agentNameOf(record.agentId)}：${describeSchedule(record)}`)
+    return { ok: true, data: next }
+  }
+
+  /** 远程暂停/恢复排程（Remote：setScheduleEnabled）。 */
+  async setScheduleEnabledRemote(id: string, enabled: boolean): Promise<ActionResult<ScheduleRecord>> {
+    return this.setScheduleEnabled(id, enabled)
+  }
+
   /** 删除排程。 */
   async deleteSchedule(id: string): Promise<ActionResult<{ id: string }>> {
     const existing = this.deps.domain.table('schedules').get(id)
@@ -1120,6 +1161,8 @@ export class CompanyService {
     const today = this.today()
     const worklogs = this.worklogs(today)
     const tasks = this.tasks()
+    const comments = this.comments()
+    const approvals = this.approvals()
     const sum = (pick: (record: WorklogRecord) => number): number =>
       worklogs.reduce((total, record) => total + pick(record), 0)
     return {
@@ -1133,9 +1176,9 @@ export class CompanyService {
       projects: this.projects(),
       docs: this.docs(),
       tasks,
-      comments: this.comments(),
+      comments,
       messages: this.messages({ limit: 60 }),
-      approvals: this.approvals(),
+      approvals,
       schedules: this.schedules(),
       worklogs,
       activity: [...this.deps.domain.table('activity').entries()]
@@ -1144,7 +1187,18 @@ export class CompanyService {
         .slice(0, 80),
       residentIds: this.deps.residentIds(),
       reportDelivery: this.deps.config.reportDelivery,
-      revision: revisionOf({ agents: this.agents(), tasks, messages: this.messages({ limit: 60 }), approvals: this.approvals(), worklogs }),
+      timeZone: this.deps.config.timeZone,
+      revision: `seq:${this.writeSeq}|${revisionOf({
+        agents: this.agents(),
+        projects: this.projects(),
+        docs: this.docs(),
+        tasks,
+        comments,
+        messages: this.messages({ limit: 60 }),
+        approvals,
+        schedules: this.schedules(),
+        worklogs,
+      })}`,
       stats: {
         agents: this.agents().filter((record) => record.status === 'active').length,
         activeTasks: tasks.filter((record) => record.status === 'in_progress' || record.status === 'review').length,
@@ -1525,18 +1579,22 @@ function emptyWorklog(key: string, agentId: string, date: string): WorklogRecord
 }
 
 /**
- * 内容指纹：只覆盖面板真正会渲染的表，长度 + 最近更新时间即可判定「有没有变」。
- * 目的是让客户端在无变化时跳过整页重渲染。
+ * 内容指纹：覆盖面板会渲染的**所有**表——数量 + 时间戳之和。
+ * 客户端据此在「什么都没变」时跳过整页重渲染；漏掉任何一张表都会导致
+ * 该表变化后面板不刷新（曾因漏了 schedules 而看不到新建的排程）。
  */
-function revisionOf(parts: { agents: readonly { updatedAt: number }[]; tasks: readonly { updatedAt: number }[]; messages: readonly { id: string }[]; approvals: readonly { id: string }[]; worklogs: readonly { updatedAt: number }[] }): string {
-  const newest = (rows: readonly { updatedAt: number }[]): number => rows.reduce((max, row) => Math.max(max, row.updatedAt), 0)
-  return [
-    parts.agents.length, newest(parts.agents),
-    parts.tasks.length, newest(parts.tasks),
-    parts.messages.length, parts.messages[0]?.id ?? '-',
-    parts.approvals.length, parts.approvals.filter((row) => (row as { status?: string }).status === 'pending').length,
-    parts.worklogs.length, newest(parts.worklogs),
-  ].join(':')
+function revisionOf(parts: Record<string, readonly Record<string, unknown>[]>): string {
+  return Object.entries(parts)
+    .map(([key, rows]) => {
+      let stamp = 0
+      for (const row of rows) {
+        const value = (row.updatedAt ?? row.createdAt ?? row.at ?? row.decidedAt ?? 0) as number
+        if (typeof value === 'number' && Number.isFinite(value)) stamp += value
+      }
+      return `${key}:${rows.length}:${stamp}`
+    })
+    .sort()
+    .join('|')
 }
 
 /** 时区日期键。 */

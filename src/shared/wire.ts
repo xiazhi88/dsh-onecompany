@@ -192,6 +192,8 @@ export const zCompanyState = z.object({
   residentIds: z.array(z.string()),
   /** 当前汇报投递模式（digest/record），面板展示用。 */
   reportDelivery: z.string(),
+  /** 定时任务时区（cron 解释用）。 */
+  timeZone: z.string(),
   /** 内容指纹：变化才需要重渲染（客户端据此跳过无变化的轮询结果）。 */
   revision: z.string(),
   stats: z.object({

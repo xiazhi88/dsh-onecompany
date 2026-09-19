@@ -671,3 +671,39 @@
   font-weight: 700;
 }
 .oc-header-action__text { white-space: nowrap; }
+
+/* ── 排程页 ─────────────────────────────────────────────────────── */
+
+.oc-sched { display: flex; align-items: flex-start; gap: 10px; }
+.oc-sched__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.oc-sched__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.oc-sched__prompt {
+  color: var(--dsw-alias-label-secondary, #9aa3b4);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.oc-sched__actions { display: flex; align-items: center; gap: 6px; flex: none; }
+
+.oc-seg { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.oc-seg__item {
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: var(--dsw-alias-label-primary, #e9ecf3);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.oc-seg__item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.06)); }
+.oc-seg__item--on {
+  border-color: rgba(79, 124, 247, 0.7);
+  background: color-mix(in srgb, var(--oc-accent, #4f7cf7) 22%, transparent);
+  color: var(--dsw-alias-label-primary, #fff);
+}
+
+.oc-input--area { height: auto; padding: 8px 10px; line-height: 1.55; resize: vertical; font-family: inherit; }
+.oc-error { color: #ef6b73; font-size: 12.5px; }

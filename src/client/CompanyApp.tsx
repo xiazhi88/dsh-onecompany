@@ -9,6 +9,7 @@ import { Btn, NavIcon, Pill, Toast, usePanel } from './ui.tsx'
 import { Overview } from './views/Overview.tsx'
 import { Org } from './views/Org.tsx'
 import { Tasks } from './views/Tasks.tsx'
+import { Schedule } from './views/Schedule.tsx'
 import { Approvals } from './views/Approvals.tsx'
 import { Library } from './views/Library.tsx'
 import { Activity } from './views/Activity.tsx'
@@ -18,6 +19,7 @@ const NAV: { id: ViewId; label: string }[] = [
   { id: 'overview', label: '总览' },
   { id: 'org', label: '组织' },
   { id: 'tasks', label: '任务' },
+  { id: 'schedule', label: '排程' },
   { id: 'approvals', label: '审批' },
   { id: 'library', label: '资料库' },
   { id: 'activity', label: '动态' },
@@ -111,6 +113,7 @@ export function CompanyApp(props: { store: PanelStore }): React.ReactElement | n
                   {panel.view === 'overview' && <Overview state={state} onNavigate={(view) => store.setView(view)} />}
                   {panel.view === 'org' && <Org state={state} store={store} />}
                   {panel.view === 'tasks' && <Tasks state={state} store={store} onOpenAgent={setAgentDetailId} />}
+                  {panel.view === 'schedule' && <Schedule store={store} />}
                   {panel.view === 'approvals' && <Approvals state={state} store={store} />}
                   {panel.view === 'library' && <Library state={state} store={store} />}
                   {panel.view === 'activity' && <Activity state={state} store={store} />}

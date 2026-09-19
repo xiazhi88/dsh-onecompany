@@ -113,6 +113,7 @@ export const TYPERT = {
     invocation('readDocRemote', [param('docId', STRING)], DOC),
     invocation('createScheduleRemote', [param('input', SCHEDULE)], ACK),
     invocation('deleteSchedule', [param('id', STRING)], ACK),
+    invocation('setScheduleEnabledRemote', [param('id', STRING), param('enabled', BOOL)], ACK),
     invocation('approvals', [], codec('Approvals', z.array(z.record(z.string(), z.unknown())))),
     invocation('requestApprovalRemote', [param('input', APPROVAL)], ACK),
   ],
