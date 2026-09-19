@@ -1134,16 +1134,17 @@ export class CompanyService {
       docs: this.docs(),
       tasks,
       comments: this.comments(),
-      messages: this.messages({ limit: 200 }),
+      messages: this.messages({ limit: 60 }),
       approvals: this.approvals(),
       schedules: this.schedules(),
       worklogs,
       activity: [...this.deps.domain.table('activity').entries()]
         .map(([, record]) => record)
         .sort((a, b) => b.at - a.at)
-        .slice(0, 200),
+        .slice(0, 80),
       residentIds: this.deps.residentIds(),
       reportDelivery: this.deps.config.reportDelivery,
+      revision: revisionOf({ agents: this.agents(), tasks, messages: this.messages({ limit: 60 }), approvals: this.approvals(), worklogs }),
       stats: {
         agents: this.agents().filter((record) => record.status === 'active').length,
         activeTasks: tasks.filter((record) => record.status === 'in_progress' || record.status === 'review').length,
@@ -1521,6 +1522,21 @@ function emptyWorklog(key: string, agentId: string, date: string): WorklogRecord
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0,
     turns: 0, activeMs: 0, sessions: [], updatedAt: Date.now(),
   }
+}
+
+/**
+ * 内容指纹：只覆盖面板真正会渲染的表，长度 + 最近更新时间即可判定「有没有变」。
+ * 目的是让客户端在无变化时跳过整页重渲染。
+ */
+function revisionOf(parts: { agents: readonly { updatedAt: number }[]; tasks: readonly { updatedAt: number }[]; messages: readonly { id: string }[]; approvals: readonly { id: string }[]; worklogs: readonly { updatedAt: number }[] }): string {
+  const newest = (rows: readonly { updatedAt: number }[]): number => rows.reduce((max, row) => Math.max(max, row.updatedAt), 0)
+  return [
+    parts.agents.length, newest(parts.agents),
+    parts.tasks.length, newest(parts.tasks),
+    parts.messages.length, parts.messages[0]?.id ?? '-',
+    parts.approvals.length, parts.approvals.filter((row) => (row as { status?: string }).status === 'pending').length,
+    parts.worklogs.length, newest(parts.worklogs),
+  ].join(':')
 }
 
 /** 时区日期键。 */

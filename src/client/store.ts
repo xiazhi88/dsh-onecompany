@@ -186,12 +186,24 @@ export class PanelStore {
     for (const listener of this.listeners) listener()
   }
 
-  /** 插件启动时拉一次状态：侧栏红点/摘要需要在未打开面板时也准确。 */
+  /**
+   * 插件启动时拉一次状态：侧栏红点/摘要需要在未打开面板时也准确。
+   * 远程面（remote.company）可能比插件晚就绪——那样 refresh 会落到
+   * `company-remote-pending`，这里用短退避快速重试，避免长时间显示「连接中…」。
+   */
   warm(): void {
-    void this.refresh()
+    const retry = (delay: number): void => {
+      void this.refresh().then(() => {
+        if (this.state.error !== 'company-remote-pending') return
+        window.setTimeout(() => retry(Math.min(delay * 2, 15_000)), delay)
+      })
+    }
+    retry(1_500)
     window.setInterval(() => {
-      if (!this.state.open) void this.refresh()
-    }, 60_000)
+      if (this.state.open) return
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      void this.refresh()
+    }, 120_000)
   }
 
   /** 打开/关闭整页。 */
@@ -228,6 +240,11 @@ export class PanelStore {
         this.notify(`有 ${pending - this.lastPending} 项新审批待裁决`, 'err')
       }
       this.lastPending = pending
+      // 指纹没变就不 emit：避免每轮轮询都重渲染整页（约 250 行）。
+      if (this.state.state?.revision === state.revision) {
+        if (this.state.loading) this.emit({ loading: false, error: null })
+        return
+      }
       this.emit({ state, error: null, loading: false })
     } catch (error) {
       this.emit({ error: error instanceof Error ? error.message : String(error), loading: false })
@@ -238,9 +255,10 @@ export class PanelStore {
     if (this.poll !== null) return
     const tick = (): void => {
       this.poll = window.setTimeout(() => {
-        void this.refresh()
+        // 标签页在后台时不打扰服务器：回到前台立即补一次
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') void this.refresh()
         tick()
-      }, 4000)
+      }, 8000)
     }
     tick()
   }

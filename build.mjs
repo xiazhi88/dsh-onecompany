@@ -7,7 +7,6 @@
  * 用法: node build.mjs [--watch]
  */
 import { build, context } from 'esbuild'
-import { readFile } from 'node:fs/promises'
 import { mkdir } from 'node:fs/promises'
 
 const watch = process.argv.includes('--watch')
@@ -43,6 +42,7 @@ const hostConfig = {
   platform: 'node',
   target: 'es2024',
   sourcemap: true,
+  minify: true,
   external: [...HOST_EXTERNALS],
   logLevel: 'info',
 }
@@ -55,6 +55,7 @@ const typertConfig = {
   platform: 'node',
   target: 'es2024',
   sourcemap: false,
+  minify: true,
   external: ['zod'],
   logLevel: 'info',
 }
@@ -67,6 +68,7 @@ const clientConfig = {
   platform: 'browser',
   target: 'es2022',
   sourcemap: true,
+  minify: true,
   jsx: 'automatic',
   jsxImportSource: 'react',
   loader: { '.css': 'text' },

@@ -161,7 +161,8 @@ lib/           构建产物（随仓库提供，从 GitHub 安装即可用，无
 
 ## 已知成本与后续可优化
 
-- **客户端包体**：`lib/client.js` ≈ 875KB——`src/client/remote.ts` 为了让浏览器端拿到 Remote 描述符，导入了 host 的 `typert.ts`，把 zod（约 700KB）一起内联进了浏览器包。功能正常（本机 127.0.0.1，传输成本可忽略），后续可改为「客户端自持一份纯数据描述符 + `src-json` codec」来瘦身到 ~110KB（改动会动到已验证的远程链路，需单独一轮验证）。
+- **客户端包体**：`lib/client.js` 535KB（minify 后，gzip 113KB）。其中约 400KB 是 zod：客户端的 generated Remote 装配**要求 strict codec（zod 实例）**，因此 `src/client/remote.ts` 必须带 host 清单的 schema。试过用构建期生成的纯数据描述符（`src-json`）把包压到 137KB，但装配层直接拒绝（`generated Remote <field> has no strict codec`），因此保留现状。
+- **面板性能**：面板打开约 **90ms**，轮询 8s（标签页隐藏时暂停）、载荷已裁剪（消息 60 条 / 审计 80 条）、且内容指纹未变时不重渲染。
 - **会话标题重复写**：每次唤醒都会 `rename` 一次（幂等），日志里会有多条 `session/title`；可优化为「仅在创建时写」。
 - **汇报路由**：`company_report → 项目群` 的链路已实现，但需要在真实汇报发生时才会跑通（本机重启后由员工自然触发）。
 
