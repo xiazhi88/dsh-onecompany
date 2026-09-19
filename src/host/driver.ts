@@ -155,7 +155,23 @@ export class AgentDriver {
     agent.followup(this.message(text))
   }
 
-  /** 停止某任务的执行会话（会话保留、可 resume）。 */
+  /**
+   * 停止某任务的执行会话（会话保留、可 resume）。
+   *
+   * 只在 agent **空闲**时真正 dispose：`handle.dispose()` 会等当前轮次结束，
+   * 如果从这轮自己的工具调用里 await 它，就会死锁（工具等轮次、轮次等工具）。
+   * @returns 是否已停（false = 还在忙，交给下一次 tick 再试）。
+   */
+  async stopTaskIfIdle(taskId: string): Promise<boolean> {
+    const key = `task:${taskId}`
+    const resident = this.residents.get(key)
+    if (resident === undefined) return true
+    if (resident.handle.agent.status === 'running') return false
+    await this.stop(key)
+    return true
+  }
+
+  /** 停止某任务的执行会话（调用方保证不在该会话的轮次里，例如关闭公司时）。 */
   async stopTask(taskId: string): Promise<void> {
     await this.stop(`task:${taskId}`)
   }

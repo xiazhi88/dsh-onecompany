@@ -60,6 +60,8 @@ export interface ServiceDeps {
   deliverTask: (task: TaskRecord, employee: AgentRecord, text: string) => Promise<void>
   /** 停止某任务的执行会话（会话保留、可 resume）。 */
   stopTask: (taskId: string) => Promise<void>
+  /** 只在 agent 空闲时停（true = 已停，false = 还在忙）。 */
+  stopTaskIfIdle: (taskId: string) => Promise<boolean>
   /** 预热大厅与项目群会话（reconcile 用；仅启用时调用）。 */
   warmChannels: () => Promise<void>
   /** 把已存在员工会话的标题归位为「姓名 · 职位」。 */
@@ -104,6 +106,8 @@ export class CompanyService {
    * 只靠「数量 + 时间戳」会漏掉不改变这两者的写入（例如排程暂停）。
    */
   private writeSeq = 0
+  /** 待停止的执行会话（任务已收尾，等 agent 空闲后由 tick 停）。 */
+  private readonly stopRequested = new Set<string>()
 
   constructor(private readonly deps: ServiceDeps) {}
 
@@ -687,14 +691,12 @@ export class CompanyService {
     }
     await this.deps.domain.table('tasks').put(id, next)
     await this.log(actor, `task.${patch.status ?? (patch.checkout === true ? 'checkout' : 'update')}`, `任务「${next.title}」`)
-    // 一次性执行会话：任务收尾（review/done/cancelled）后停掉会话，释放常驻位。
-    // 会话本体保留在盘上，董事会随时可以从任务详情重新打开。
+    // 一次性执行会话：收尾（review/done/cancelled）后停掉会话，释放常驻位。
+    // **只登记、不当场停**——这个调用可能来自该会话自己的轮次，而 dispose() 会等
+    // 轮次结束，当场 await 必然死锁（工具等轮次、轮次等工具）。由 tick 在 agent
+    // 空闲后真正停掉；会话本体保留在盘上，董事会随时可重新打开。
     if (next.sessionId !== null && (next.status === 'done' || next.status === 'cancelled' || next.status === 'review')) {
-      try {
-        await this.deps.stopTask(next.id)
-      } catch (error) {
-        this.deps.log(`停止任务会话失败（${next.id}）：${describe(error)}`)
-      }
+      this.stopRequested.add(next.id)
     }
     if (patch.status === 'done') await this.closeParentIfDone(next)
     if (patch.assigneeId !== undefined && patch.assigneeId !== record.assigneeId && patch.assigneeId !== null) {
@@ -1367,6 +1369,15 @@ export class CompanyService {
    * 目的是避免「僵尸会话」长期占着常驻位、也让董事会一眼看到哪件事拖住了。
    */
   private async sweepTaskSessions(): Promise<void> {
+    // ① 已收尾的任务：agent 一空闲就停（登记式，避免在自己轮次里死锁）
+    for (const taskId of [...this.stopRequested]) {
+      try {
+        if (await this.deps.stopTaskIfIdle(taskId)) this.stopRequested.delete(taskId)
+      } catch (error) {
+        this.stopRequested.delete(taskId)
+        this.deps.log(`停止任务会话失败（${taskId}）：${describe(error)}`)
+      }
+    }
     const hours = this.deps.config.taskSessionTimeoutHours
     if (this.deps.config.taskSession !== 'per-task' || hours <= 0) return
     const now = Date.now()
@@ -1374,11 +1385,8 @@ export class CompanyService {
       if (task.sessionId === null || task.status !== 'in_progress') continue
       const startedAt = task.checkoutAt ?? task.createdAt
       if (now - startedAt < hours * 3600_000) continue
-      try {
-        await this.deps.stopTask(task.id)
-      } catch (error) {
-        this.deps.log(`超时停止任务会话失败（${task.id}）：${describe(error)}`)
-      }
+      // 超时也要等它空闲，避免停掉一个正在收尾的轮次
+      if (!(await this.deps.stopTaskIfIdle(task.id))) continue
       const comment: CommentRecord = {
         id: `cmt_${randomUUID().slice(0, 8)}`, taskId: task.id,
         authorType: 'system', authorId: 'system', authorName: '公司调度',
