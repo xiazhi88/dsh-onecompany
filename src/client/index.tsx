@@ -82,9 +82,32 @@ function CompanyHeaderAction(props: { store: PanelStore; sessionId?: string }): 
     ? []
     : state.tasks.filter((task) => task.parentSessionId === props.sessionId)
   const nameOf = (id: string | null): string => state?.agents.find((agent) => agent.id === id)?.name ?? '（待认领）'
+  // 当前就在某个任务的执行会话里 → 给一条回主会话的路
+  const self = state === null || props.sessionId === undefined
+    ? undefined
+    : state.tasks.find((task) => task.sessionId === props.sessionId)
+  const parentLabel = ((): string | null => {
+    if (self === undefined || self.parentSessionId === null || state === null) return null
+    const parentId = self.parentSessionId
+    if (state.agents.some((agent) => agent.sessionId === parentId && agent.role === 'ceo')) return '一人公司 · 大厅'
+    const project = state.projects.find((entry) => entry.channelSessionId === parentId)
+    if (project !== undefined) return `${project.name} · 项目群`
+    return '主会话'
+  })()
 
   return (
     <span className="oc-head-group">
+      {self !== undefined && self.parentSessionId !== null && parentLabel !== null && (
+        <button
+          type="button"
+          className="oc-header-action oc-header-action--plain"
+          title={`返回派发这个任务的会话：${parentLabel}`}
+          onClick={() => props.store.openSession(self.parentSessionId!)}
+        >
+          <span className="oc-back">←</span>
+          <span className="oc-header-action__text">{parentLabel}</span>
+        </button>
+      )}
       <button
         type="button"
         className={`oc-header-action ${total > 0 ? 'oc-header-action--alert' : ''}`}
