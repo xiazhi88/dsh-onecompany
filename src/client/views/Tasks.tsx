@@ -90,6 +90,21 @@ function TaskDrawer(props: { state: CompanyState; store: PanelStore; task: TaskR
           <div className="oc-stat__hint">
             {task.id} · 负责人 {nameOf(state, task.assigneeId)} · 优先级 {task.priority} · 更新 {fmtTime(task.updatedAt, state.now)}
           </div>
+          <div className="oc-stat__hint" style={{ marginTop: 2 }}>
+            派发：{task.dispatcherName === '' ? '（未记录）' : task.dispatcherName}
+            {task.parentSessionId === null ? '' : ' · 来自会话'}
+            {task.parentSessionId !== null && (
+              <button
+                type="button"
+                className="oc-link"
+                style={{ marginLeft: 4, background: 'none', border: 0, padding: 0, cursor: 'pointer', color: 'inherit', font: 'inherit' }}
+                title={`打开派发这条任务的会话：${task.parentSessionId}`}
+                onClick={() => store.openSession(task.parentSessionId!)}
+              >
+                {task.parentSessionId.slice(0, 14)}…
+              </button>
+            )}
+          </div>
         </div>
         <Btn variant="ghost" size="sm" onClick={props.onClose}>✕</Btn>
       </div>

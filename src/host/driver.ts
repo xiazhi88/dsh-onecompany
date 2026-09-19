@@ -171,6 +171,33 @@ export class AgentDriver {
     return true
   }
 
+  /**
+   * 往**任意会话**投递一条通知（把汇报回投给派发它的那个会话）。
+   *
+   * 与员工/频道不同：这里只挂**部署默认 preset**、不注册公司工具——目标可能是董事会
+   * 自己的普通会话，它该以原样被唤醒，不该变成公司 agent。
+   * 只做 resume，不新建：目标会话不存在就抛错，由调用方回落到董事会信箱。
+   * @param sessionId - 目标会话。
+   * @param text - 正文。
+   * @param notice - 一行摘要（按通知行折叠显示）。
+   */
+  async deliverToSession(sessionId: string, text: string, notice?: string): Promise<void> {
+    const registry = this.deps.ctx.agents as unknown as {
+      get: (id: string) => Agent | undefined
+      resume: (input: { resumeSessionId: string; agentOptions?: AgentOptions; setup?: (ctx: Context) => Promise<void> | void }) => Promise<Agent>
+    }
+    const live = registry.get(sessionId)
+    const agent = live ?? await registry.resume({
+      resumeSessionId: sessionId,
+      agentOptions: {},
+      setup: async (agentCtx: Context) => {
+        const presets = this.deps.ctx.get('agentPresets') as { mount: (ctx: Context, id?: string) => Promise<unknown> } | undefined
+        await presets?.mount(agentCtx, undefined)
+      },
+    })
+    agent.followup(this.message(text, notice))
+  }
+
   /** 停止某任务的执行会话（调用方保证不在该会话的轮次里，例如关闭公司时）。 */
   async stopTask(taskId: string): Promise<void> {
     await this.stop(`task:${taskId}`)
@@ -284,7 +311,7 @@ export class AgentDriver {
       if (spec.onCreated !== undefined) await spec.onCreated()
     }
     this.residents.set(key, { handle, lastUsed: Date.now() })
-    this.renameTitle(handle.agent, spec.title)
+    if (spec.title !== '') this.renameTitle(handle.agent, spec.title)
     if (spec.attach !== false) await this.deps.attachWorkspace(handle.agent)
     // 从未跑过轮次的会话是 blank（侧栏不可见）：新建时或恢复时补一次开场。
     const everRan = created

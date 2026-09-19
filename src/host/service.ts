@@ -62,6 +62,10 @@ export interface ServiceDeps {
   stopTask: (taskId: string) => Promise<void>
   /** 只在 agent 空闲时停（true = 已停，false = 还在忙）。 */
   stopTaskIfIdle: (taskId: string) => Promise<boolean>
+  /** 往任意会话投递一条通知（回投汇报给派发它的会话）。 */
+  deliverToSession: (sessionId: string, text: string, notice?: string) => Promise<void>
+  /** 确保某个项目群会话就绪（新建项目后立即调用，省得等下次启动）。 */
+  ensureChannel: (project: ProjectRecord) => Promise<void>
   /** 预热大厅与项目群会话（reconcile 用；仅启用时调用）。 */
   warmChannels: () => Promise<void>
   /** 把已存在员工会话的标题归位为「姓名 · 职位」。 */
@@ -616,6 +620,7 @@ export class CompanyService {
       dueAt: input.dueAt ?? null,
       checkoutBy: null, checkoutAt: null, result: null,
       sessionId: this.deps.config.taskSession === 'per-task' && input.assigneeId != null ? `ses_${randomUUID()}` : null,
+      dispatcherName: creator.name,
       parentSessionId: input.parentSessionId ?? this.ceo()?.sessionId ?? null,
       createdAt: now, updatedAt: now, doneAt: null,
     }
@@ -935,6 +940,10 @@ export class CompanyService {
       createdAt: Date.now(),
     }
     await this.deps.domain.table('projects').put(id, record)
+    // 让项目群会话立即就绪（不阻塞建项目）：新建项目后就能在那里派活/收汇报。
+    void this.deps.ensureChannel(record).catch((error: unknown) => {
+      this.deps.log(`项目群会话预建失败（${id}）：${describe(error)}`)
+    })
     await this.log(actor, 'project.create', `项目「${name}」`)
     return { ok: true, data: record }
   }
@@ -1434,6 +1443,11 @@ export class CompanyService {
           ? '## 开工前必读\n本项目还没有档案；先 `company_doc_list` 看看有什么，再决定要不要建一份交接记录。'
           : `## 开工前必读（本项目档案，按需 company_doc_read 读全文——不要凭记忆猜）\n${docs}`,
         comments === '' ? '' : `## 最近讨论\n${comments}`,
+        '## 谁派的活\n由 '
+        + (task.dispatcherName === '' ? '上级' : task.dispatcherName)
+        + ' 派发'
+        + (task.parentSessionId === null ? '' : '（来自他/她的会话）')
+        + '；完成后 `company_report` 会把结论回投到那里，同时归档进项目档案。',
         '## 交活\n1. 完成后 `company_task_update`（status=review，result 写清：改了什么 / 跑了什么验证 / 未完成项与风险）；'
         + '\n2. 产出落到项目档案（company_doc_write）或仓库文件，别只写在会话里；'
         + '\n3. `company_report` 汇报结论——它会被归档到项目《汇报流水》，不会打断别人。'
@@ -1467,10 +1481,12 @@ export class CompanyService {
       const projectId = task?.projectId ?? null
       const path = await this.appendReportLog(projectId, actor, body, taskId === null ? '汇报' : `汇报 · ${taskId}`)
       await this.log(actor, 'report.record', `${actor.name} 的汇报已归档 ${path}`)
+      // 回投派发它的那个会话（董事会自己的会话 / 项目群 / 大厅）——不然派活的人看不到结果。
+      const relay = await this.relayToDispatcher(task, actor, body, path)
       return this.sendMail(actor, {
         toId: 'board',
         kind: 'report',
-        body: `${body}\n\n---\n已归档到 ${path}（汇报投递模式：record，未叫醒任何 agent）`,
+        body: `${body}\n\n---\n已归档到 ${path}${relay}（record 模式：不叫醒非相关 agent）`,
         taskId,
       })
     }
@@ -1521,6 +1537,32 @@ export class CompanyService {
       return { ok: false, code: 'unknown_assignee', message: `员工 ${input.employeeId} 不存在` }
     }
     return this.createTask(actor, { ...input, assigneeId: input.employeeId })
+  }
+
+  /**
+   * 把汇报回投给派发它的那个会话。
+   * @returns 一行说明（拼进信箱正文），失败时说明原因而不是抛错。
+   */
+  private async relayToDispatcher(task: TaskRecord | undefined, actor: Actor, body: string, archivePath: string): Promise<string> {
+    const target = task?.parentSessionId ?? null
+    if (target === null) return ''
+    const who = task?.dispatcherName === undefined || task.dispatcherName === '' ? '派发人' : task.dispatcherName
+    const text = [
+      `【${actor.name} 的汇报${task === undefined ? '' : ` · ${task.title}（${task.id}）`}】`,
+      '',
+      body,
+      '',
+      `---`,
+      `由 ${who} 派发；原文已归档到 ${archivePath}。`,
+    ].join('\n')
+    try {
+      await this.deps.deliverToSession(target, text, `${actor.name} 汇报了「${task?.title ?? '任务'}」`)
+      return `，并已回投派发会话`
+    } catch (error) {
+      const message = describe(error)
+      this.deps.log(`汇报回投失败（会话 ${target}）：${message}`)
+      return `，但回投派发会话失败：${message.slice(0, 120)}`
+    }
   }
 
   /**
@@ -1609,6 +1651,23 @@ export class CompanyService {
   async reconcile(): Promise<void> {
     if (this.ceo() === undefined) await this.createCeo()
     const ceo = this.ceo()
+
+    // 历史任务补归属：早于「派发来源」之前建的任务 parentSessionId 为空，
+    // 按创建者推断（CEO 派的 → 大厅；项目任务 → 该项目群；其余 → 大厅），
+    // 这样「N 个任务」才能挂在正确的会话上。
+    for (const task of this.tasks()) {
+      if (task.parentSessionId !== null) continue
+      const project = task.projectId === null ? undefined : this.deps.domain.table('projects').get(task.projectId)
+      // 规则：项目任务归该项目群（派活/汇报都在群里）；无项目则归大厅。
+      const fallback = project?.channelSessionId ?? ceo?.sessionId ?? null
+      if (fallback === null) continue
+      await this.deps.domain.table('tasks').put(task.id, {
+        ...task,
+        parentSessionId: fallback,
+        dispatcherName: task.dispatcherName === '' ? (task.creatorId === ceo?.id ? '司南' : '董事会') : task.dispatcherName,
+        updatedAt: task.updatedAt,
+      })
+    }
 
     // 预算兜底：没有显式预算的 agent 按角色补默认上限（CEO 上限更高），
     // 超限后投递会被暂停到次日——这是「token 消耗失控」的硬止损。

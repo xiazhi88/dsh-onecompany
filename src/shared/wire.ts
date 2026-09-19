@@ -85,6 +85,8 @@ export const zTask = z.object({
   checkoutBy: z.string().nullable(),
   /** 一次性执行会话 id（per-task 模式）；null = 尚未创建或走常驻工位。 */
   sessionId: z.string().nullable().default(null),
+  /** 派发人显示名（董事会 / 司南 / 其它员工），用于任务详情与汇报回投。 */
+  dispatcherName: z.string().default(''),
   /**
    * 执行会话的父会话：任务会话以 `origin: 'subagent'` 挂在这个会话下，
    * 于是它不进侧栏，只显示在父会话标题栏的「N 个子代理」里。

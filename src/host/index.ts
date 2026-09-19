@@ -197,6 +197,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (driver === undefined) return
       await driver.stopTask(taskId)
     },
+    ensureChannel: async (project) => {
+      if (driver === undefined) return
+      await driver.ensureChannel(project)
+    },
+    deliverToSession: async (sessionId, text, notice) => {
+      if (driver === undefined) throw new Error('员工驱动尚未就绪')
+      await driver.deliverToSession(sessionId, text, notice)
+    },
     stopTaskIfIdle: async (taskId) => {
       if (driver === undefined) return true
       return driver.stopTaskIfIdle(taskId)
