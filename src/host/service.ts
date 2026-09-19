@@ -612,6 +612,7 @@ export class CompanyService {
       dueAt: input.dueAt ?? null,
       checkoutBy: null, checkoutAt: null, result: null,
       sessionId: this.deps.config.taskSession === 'per-task' && input.assigneeId != null ? `ses_${randomUUID()}` : null,
+      parentSessionId: input.parentSessionId ?? this.ceo()?.sessionId ?? null,
       createdAt: now, updatedAt: now, doneAt: null,
     }
     await this.deps.domain.table('tasks').put(id, record)

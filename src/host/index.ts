@@ -235,7 +235,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   const composeChannel = (project: ProjectRecord): ComposeSpec => ({
     kind: 'channel',
-    tools: buildChannelTools(service),
+    tools: buildChannelTools(service, project),
     prompt: () => service.channelPrompt(project.id),
     presetId: null,
   })

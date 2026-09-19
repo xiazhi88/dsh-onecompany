@@ -85,6 +85,11 @@ export const zTask = z.object({
   checkoutBy: z.string().nullable(),
   /** 一次性执行会话 id（per-task 模式）；null = 尚未创建或走常驻工位。 */
   sessionId: z.string().nullable().default(null),
+  /**
+   * 执行会话的父会话：任务会话以 `origin: 'subagent'` 挂在这个会话下，
+   * 于是它不进侧栏，只显示在父会话标题栏的「N 个子代理」里。
+   */
+  parentSessionId: z.string().nullable().default(null),
   checkoutAt: z.number().nullable(),
   result: z.string().nullable(),
   createdAt: z.number(),
@@ -284,6 +289,8 @@ export const zTaskInput = z.object({
   priority: z.number().optional(),
   dueAt: z.number().nullable().optional(),
   parentTaskId: z.string().nullable().optional(),
+  /** 派发它的会话：任务会话会成为该会话的子代理（不进侧栏）。 */
+  parentSessionId: z.string().nullable().optional(),
 })
 export type TaskInput = z.infer<typeof zTaskInput>
 

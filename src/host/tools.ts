@@ -5,7 +5,7 @@
  */
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { BOARD, type Actor, type CompanyService } from './service.ts'
-import type { ActionResult, ApprovalKind, MailKind, ScheduleKind, TaskStatus } from '../shared/wire.ts'
+import type { ActionResult, ApprovalKind, MailKind, ScheduleKind, TaskStatus, ProjectRecord } from '../shared/wire.ts'
 
 /** 统一输出：一行 JSON 文本（含成功/失败标记，便于模型与人类阅读）。 */
 const textOutput = {
@@ -345,7 +345,7 @@ const ANNOUNCE_DESC = '向某项目群（或大厅）发一条面向董事会的
 const APPROVAL_DECIDE_DESC = '裁决送到你这里的审批（你是一审）。批准/驳回会自动把结果回投给发起人。'
 
 /** CEO 专属工具（追加在员工工具之后）。 */
-export function buildCeoExtras(service: CompanyService, agentId: string): ToolDefinition[] {
+export function buildCeoExtras(service: CompanyService, agentId: string, parentSessionId?: string | null): ToolDefinition[] {
   const actorOf = (): Actor => {
     const record = service.agent(agentId)
     return { type: 'agent', id: agentId, name: record?.name ?? agentId }
@@ -382,6 +382,7 @@ export function buildCeoExtras(service: CompanyService, agentId: string): ToolDe
           desc: args.desc,
           projectId: args.project_id ?? null,
           priority: args.priority ?? 0,
+          parentSessionId: parentSessionId ?? null,
         })
       }),
     }),
@@ -457,17 +458,18 @@ export function buildCeoExtras(service: CompanyService, agentId: string): ToolDe
 }
 
 /** 频道（项目群/大厅）工具 = 员工通用工具（以 CEO 身份）+ CEO 专属。 */
-export function buildChannelTools(service: CompanyService): ToolDefinition[] {
+export function buildChannelTools(service: CompanyService, project: ProjectRecord): ToolDefinition[] {
   const ceo = service.ceo()
   const actorId = ceo?.id ?? 'agt_ceo'
-  return [...buildCompanyTools(service, actorId), ...buildCeoExtras(service, actorId)]
+  // 群会话里派出去的活，任务是它的子代理（显示在「N 个子代理」里）
+  return [...buildCompanyTools(service, actorId), ...buildCeoExtras(service, actorId, project.channelSessionId)]
 }
 
 /**
  * 全局派活工具（挂在用户的普通会话上）：@员工 或直呼其名即派活。
  * 不在公司员工/频道会话上注册。
  */
-export function buildCallTool(service: CompanyService): ToolDefinition {
+export function buildCallTool(service: CompanyService, parentSessionId?: string): ToolDefinition {
   return defineTool({
     name: 'company_call',
     description: '把一项工作派给公司里的员工或 CEO。当用户说「@某人做某事」「让某人做某事」时使用。完成后结果会以简报形式出现在对应的项目群会话里。',
@@ -496,6 +498,7 @@ export function buildCallTool(service: CompanyService): ToolDefinition {
           desc: args.task,
           projectId,
           priority: 1,
+          parentSessionId: parentSessionId ?? null,
         })
         if (!result.ok || result.data === undefined) return `❌ ${result.message ?? '派活失败'}`
         const project = result.data.projectId === null ? undefined : service.projects().find((entry) => entry.id === result.data!.projectId)

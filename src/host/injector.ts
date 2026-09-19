@@ -24,7 +24,8 @@ export function installRootInjector(
   const instrument = (agent: Agent): void => {
     try {
       if (isOurs(agent.session.id)) return
-      agent.ctx.tools.register(buildCallTool(service))
+      // 派发时把「当前这个普通会话」作为父会话：任务会话会挂成它的子代理（不进侧栏）
+      agent.ctx.tools.register(buildCallTool(service, agent.session.id))
       agent.ctx.systemPrompt.section({
         name: 'onecompany-call',
         order: 70,

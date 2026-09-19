@@ -134,10 +134,17 @@ export class AgentDriver {
   async ensureTask(task: TaskRecord, employee: AgentRecord): Promise<Agent> {
     const sessionId = task.sessionId ?? `ses_${crypto.randomUUID()}`
     return this.ensureKeyed(`task:${task.id}`, sessionId, true, {
-      meta: { cwd: employee.cwd, ...(employee.presetId === null ? {} : { agentPreset: employee.presetId }) },
+      meta: {
+        cwd: employee.cwd,
+        ...(employee.presetId === null ? {} : { agentPreset: employee.presetId }),
+        // 子代理血统：客户端据此把该会话从侧栏隐藏，改为显示在父会话的「N 个子代理」里。
+        origin: 'subagent',
+        ...(task.parentSessionId === null ? {} : { parentSession: task.parentSessionId }),
+      },
       options: this.optionsOf(employee),
       compose: (agentCtx) => this.composeWith(agentCtx, this.deps.composeTask(task, employee)),
       title: `${task.id} · ${task.title.slice(0, 24)}`,
+      attach: false,
     })
   }
 
@@ -220,12 +227,14 @@ export class AgentDriver {
     sessionId: string,
     resume: boolean,
     spec: {
-      meta: { cwd: string; agentPreset?: string }
+      meta: { cwd: string; agentPreset?: string; origin?: 'subagent'; parentSession?: string }
       options: AgentOptions
       compose: (agentCtx: Context) => Promise<void>
       title: string
       onCreated?: () => Promise<void>
       kickoff?: string
+      /** 是否把会话归入工作区（任务会话为 false：它挂在父会话下，不进侧栏）。 */
+      attach?: boolean
     },
   ): Promise<Agent> {
     const resident = this.residents.get(key)
@@ -259,7 +268,7 @@ export class AgentDriver {
     }
     this.residents.set(key, { handle, lastUsed: Date.now() })
     this.renameTitle(handle.agent, spec.title)
-    await this.deps.attachWorkspace(handle.agent)
+    if (spec.attach !== false) await this.deps.attachWorkspace(handle.agent)
     // 从未跑过轮次的会话是 blank（侧栏不可见）：新建时或恢复时补一次开场。
     const everRan = created
       ? false
@@ -277,7 +286,7 @@ export class AgentDriver {
   private async createKeyed(
     sessionId: string,
     spec: {
-      meta: { cwd: string; agentPreset?: string }
+      meta: { cwd: string; agentPreset?: string; origin?: 'subagent'; parentSession?: string }
       options: AgentOptions
       compose: (agentCtx: Context) => Promise<void>
       title: string
