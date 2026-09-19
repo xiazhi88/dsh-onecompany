@@ -1703,6 +1703,22 @@ export class CompanyService {
     if (this.ceo() === undefined) await this.createCeo()
     const ceo = this.ceo()
 
+    // 历史任务归位（含纠错）：带项目且有项目群的任务，一律归该项目群。
+    // —— 早期版本把项目任务的父会话写成了大厅（字段刚加时群会话 id 还没写回），
+    //    只补空值救不了这些任务，于是汇报会回到大厅而不是项目群（踩过）。
+    for (const task of this.tasks()) {
+      if (task.projectId === null || task.parentSessionId === ceo?.sessionId !== true) continue
+      const channel = this.deps.domain.table('projects').get(task.projectId)?.channelSessionId ?? null
+      if (channel === null || channel === task.parentSessionId) continue
+      await this.deps.domain.table('tasks').put(task.id, {
+        ...task,
+        parentSessionId: channel,
+        dispatcherName: task.dispatcherName === '' ? '司南' : task.dispatcherName,
+        updatedAt: task.updatedAt,
+      })
+      this.deps.log(`任务 ${task.id} 归位到项目群 ${channel}`)
+    }
+
     // 历史任务补归属：早于「派发来源」之前建的任务 parentSessionId 为空，
     // 按创建者推断（CEO 派的 → 大厅；项目任务 → 该项目群；其余 → 大厅），
     // 这样「N 个任务」才能挂在正确的会话上。

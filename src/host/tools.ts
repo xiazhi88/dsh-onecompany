@@ -446,11 +446,13 @@ export function buildCeoExtras(service: CompanyService, agentId: string, parentS
 }
 
 /** 频道（项目群/大厅）工具 = 员工通用工具（以 CEO 身份）+ CEO 专属。 */
-export function buildChannelTools(service: CompanyService, project: ProjectRecord): ToolDefinition[] {
+export function buildChannelTools(service: CompanyService, parentSessionId: string): ToolDefinition[] {
   const ceo = service.ceo()
   const actorId = ceo?.id ?? 'agt_ceo'
-  // 群会话里派出去的活，任务是它的子代理（显示在「N 个子代理」里）
-  return [...buildCompanyTools(service, actorId), ...buildCeoExtras(service, actorId, project.channelSessionId)]
+  // 群会话里派出去的活，父会话就是**这个群会话自己**。
+  // 用传进来的 sessionId 而不是 project.channelSessionId：后者在群首次创建时还没写回
+  // （markChannel 发生在 agent 创建之后），会取到 null 而回落到大厅（踩过）。
+  return [...buildCompanyTools(service, actorId), ...buildCeoExtras(service, actorId, parentSessionId)]
 }
 
 /**
@@ -535,10 +537,7 @@ type CompanyRole =
  */
 export function buildToolsForRole(service: CompanyService, role: CompanyRole, sessionId: string): ToolDefinition[] {
   if (role.kind === 'hall') return [...buildCompanyTools(service, role.agentId), ...buildCeoExtras(service, role.agentId, sessionId)]
-  if (role.kind === 'channel') {
-    const project = service.projects().find((entry) => entry.id === role.projectId)
-    return project === undefined ? buildCompanyTools(service, role.agentId) : buildChannelTools(service, project)
-  }
+  if (role.kind === 'channel') return buildChannelTools(service, sessionId)
   const record = service.agent(role.agentId)
   const extras = record !== undefined && (record.role === 'ceo' || record.permissions.canApprove) ? buildCeoExtras(service, role.agentId) : []
   return [...buildCompanyTools(service, role.agentId), ...extras]
