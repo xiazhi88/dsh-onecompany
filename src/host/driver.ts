@@ -12,17 +12,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { AgentRecord, ProjectRecord, TaskRecord } from '../shared/wire.ts'
 
 /** 组合一个 agent 作用域所需的输入。 */
 export interface ComposeSpec {
   /** 这个 agent 是什么角色（决定工具面收窄与提示词性质）。 */
   kind: 'employee' | 'hall' | 'channel'
-  /** 作用域内注册的公司工具。 */
-  tools: ToolDefinition[]
-  /** 提示词段文本（每次组装时求值）。 */
-  prompt: string | (() => string)
   /** 预设 id；null/undefined = 部署默认 preset。 */
   presetId: string | null
 }
@@ -376,14 +371,9 @@ export class AgentDriver {
       this.deps.log('本部署未挂载 agent-presets，该 agent 只有公司工具可用')
     }
     this.applyToolRestriction(agentCtx, spec.kind)
-    for (const tool of spec.tools) {
-      agentCtx.tools.register(tool)
-    }
-    agentCtx.systemPrompt.section({
-      name: 'onecompany-role',
-      order: 60,
-      text: spec.prompt,
-    })
+    // 公司工具与岗位提示词**不在这里注册**：由 injector 在 `agent/created` 上统一注入，
+    // 那样平台自己恢复会话（冷读后继续对话）也能拿到工具，不会退化成普通 agent。
+    // 这里重复注册会抛「duplicate tool」——保持单一注册点。
   }
 
   /**

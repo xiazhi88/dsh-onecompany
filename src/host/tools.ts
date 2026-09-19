@@ -516,3 +516,38 @@ export function callPromptSection(service: CompanyService): () => string {
     ].join('\n')
   }
 }
+
+
+/** 公司角色（与 service.companyRoleOf 返回值一致）。 */
+type CompanyRole =
+  | { kind: 'hall'; agentId: string }
+  | { kind: 'channel'; agentId: string; projectId: string }
+  | { kind: 'employee'; agentId: string }
+  | { kind: 'task'; agentId: string; taskId: string }
+
+/**
+ * 按角色装配该 agent 应得的公司工具。
+ * 单一来源：`agent/created` 注入器（覆盖任何恢复路径）调用它，
+ * 不允许再有第二处注册（重复注册会抛错）。
+ * @param service - 公司服务。
+ * @param role - 角色与归属。
+ * @param sessionId - 该 agent 自己的会话（大厅/项目群派活时作为任务父会话）。
+ */
+export function buildToolsForRole(service: CompanyService, role: CompanyRole, sessionId: string): ToolDefinition[] {
+  if (role.kind === 'hall') return [...buildCompanyTools(service, role.agentId), ...buildCeoExtras(service, role.agentId, sessionId)]
+  if (role.kind === 'channel') {
+    const project = service.projects().find((entry) => entry.id === role.projectId)
+    return project === undefined ? buildCompanyTools(service, role.agentId) : buildChannelTools(service, project)
+  }
+  const record = service.agent(role.agentId)
+  const extras = record !== undefined && (record.role === 'ceo' || record.permissions.canApprove) ? buildCeoExtras(service, role.agentId) : []
+  return [...buildCompanyTools(service, role.agentId), ...extras]
+}
+
+/** 按角色装配提示词段（每次组装时求值：动态内容不内联、也不写死）。 */
+export function buildPromptForRole(service: CompanyService, role: CompanyRole): () => string {
+  if (role.kind === 'hall') return () => service.hallPrompt()
+  if (role.kind === 'channel') return () => service.channelPrompt(role.projectId)
+  if (role.kind === 'task') return () => service.taskPrompt(role.taskId, role.agentId)
+  return () => service.employeePrompt(role.agentId)
+}

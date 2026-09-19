@@ -10,7 +10,7 @@ import { AgentDriver, describe, type ComposeSpec } from './driver.ts'
 import { CompanyService } from './service.ts'
 import { buildCeoExtras, buildChannelTools, buildCompanyTools } from './tools.ts'
 import { registerCallCommand, registerCompanyCommand } from './commands.ts'
-import { installRootInjector } from './injector.ts'
+import { installCompanyAgentInjector, installRootInjector } from './injector.ts'
 import { ensurePaths, resolveRoot } from './paths.ts'
 import type { AgentRecord, ProjectRecord, TaskRecord } from '../shared/wire.ts'
 
@@ -235,35 +235,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     log,
   })
 
-  const composeEmployee = (record: AgentRecord): ComposeSpec => {
-    const tools = buildCompanyTools(service, record.id)
-    const extras = record.role === 'ceo' || record.permissions.canApprove ? buildCeoExtras(service, record.id) : []
-    return {
-      kind: record.role === 'ceo' ? 'hall' : 'employee',
-      tools: [...tools, ...extras],
-      prompt: () => service.employeePrompt(record.id),
-      presetId: record.presetId,
-    }
-  }
-  const composeChannel = (project: ProjectRecord): ComposeSpec => ({
-    kind: 'channel',
-    tools: buildChannelTools(service, project),
-    prompt: () => service.channelPrompt(project.id),
-    presetId: null,
-  })
-  const composeTask = (task: TaskRecord, employee: AgentRecord): ComposeSpec => ({
-    kind: 'employee',
-    tools: buildCompanyTools(service, employee.id),
-    prompt: () => service.taskPrompt(task.id, employee.id),
-    presetId: employee.presetId,
-  })
-
-  const composeHall = (record: AgentRecord): ComposeSpec => ({
-    kind: 'hall',
-    tools: [...buildCompanyTools(service, record.id), ...buildCeoExtras(service, record.id)],
-    prompt: () => service.hallPrompt(),
+  // 组合只负责「挂哪个 preset + 收窄工具面」；公司工具与岗位提示词由 injector 在
+  // `agent/created` 上统一注入（那样任何恢复路径都带得上，见 installCompanyAgentInjector）。
+  const composeEmployee = (record: AgentRecord): ComposeSpec => ({
+    kind: record.role === 'ceo' ? 'hall' : 'employee',
     presetId: record.presetId,
   })
+  const composeChannel = (_project: ProjectRecord): ComposeSpec => ({ kind: 'channel', presetId: null })
+  const composeTask = (_task: TaskRecord, employee: AgentRecord): ComposeSpec => ({ kind: 'employee', presetId: employee.presetId })
+  const composeHall = (record: AgentRecord): ComposeSpec => ({ kind: 'hall', presetId: record.presetId })
 
   /**
    * 收窄工具面：把与公司工作无关的宿主级工具（会话迁移、编排、可视化等）
@@ -361,6 +341,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   // 根会话注入：普通会话获得 company_call 工具与名册提示。
   installRootInjector(ctx, service, (sessionId) => service.isCompanySession(sessionId), log)
+  installCompanyAgentInjector(ctx, service, log)
 
   // token 用量：旁路捕获每次模型调用的 usage（透明透传，不改流协议）。
   ctx.on('llm/stream', (options, next) => {

@@ -121,6 +121,30 @@ export class CompanyService {
   }
 
   /**
+   * 会话 → 公司角色。**任何恢复路径都要用它**：平台自己 resume（例如你在一个已停止的
+   * 任务会话里发消息）也必须补上公司工具与岗位提示词，否则那个会话会退化成普通 agent
+   * （踩过：CEO 大厅被裸组合，company_* 全部 unknown tool）。
+   * @param sessionId - 会话 id。
+   * @returns 角色与归属，非公司会话返回 undefined。
+   */
+  companyRoleOf(sessionId: string):
+    | { kind: 'hall'; agentId: string }
+    | { kind: 'channel'; agentId: string; projectId: string }
+    | { kind: 'employee'; agentId: string }
+    | { kind: 'task'; agentId: string; taskId: string }
+    | undefined {
+    const ceo = this.ceo()
+    if (ceo !== undefined && ceo.sessionId === sessionId) return { kind: 'hall', agentId: ceo.id }
+    const channel = this.projects().find((project) => project.channelSessionId === sessionId)
+    if (channel !== undefined) return { kind: 'channel', agentId: ceo?.id ?? 'agt_ceo', projectId: channel.id }
+    const record = this.agents().find((entry) => entry.sessionId === sessionId)
+    if (record !== undefined) return record.role === 'ceo' ? { kind: 'hall', agentId: record.id } : { kind: 'employee', agentId: record.id }
+    const task = this.tasks().find((entry) => entry.sessionId === sessionId)
+    if (task !== undefined && task.assigneeId !== null) return { kind: 'task', agentId: task.assigneeId, taskId: task.id }
+    return undefined
+  }
+
+  /**
    * 公司协作协议文本：**按角色分开**——CEO（有派活权）与员工读到的不是同一份。
    * 踩过的坑：早先共用一份，里面写着「不要给别人派活」，CEO 读到后以为自己失去了派活权。
    * @param agentId - 读协议的 agent。
@@ -912,8 +936,10 @@ export class CompanyService {
 
   /** 判断一个会话是否属于公司（员工工位 / 大厅 / 项目群）。 */
   isCompanySession(sessionId: string): boolean {
-    if (this.agents().some((record) => record.sessionId === sessionId)) return true
-    return this.projects().some((project) => project.channelSessionId === sessionId)
+    if (this.companyRoleOf(sessionId) !== undefined) return true
+    // 已收尾的任务会话也仍属公司（任务记录里留着 sessionId）——否则会被当成董事会的
+    // 普通会话注入 company_call，等于让员工拿到派活工具（越权）。
+    return this.tasks().some((task) => task.sessionId === sessionId)
   }
 
   /**
