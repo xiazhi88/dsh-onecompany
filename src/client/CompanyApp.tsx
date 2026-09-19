@@ -4,7 +4,7 @@
  */
 import React, { useEffect, useState } from 'react'
 import type { CompanyRemote, PanelStore, ViewId } from './store.ts'
-import { fmtTokens, pendingApprovals } from './store.ts'
+import { fmtTokens, pendingApprovals, unreadBoardMail } from './store.ts'
 import { Btn, NavIcon, Pill, Toast, usePanel } from './ui.tsx'
 import { Overview } from './views/Overview.tsx'
 import { Org } from './views/Org.tsx'
@@ -46,6 +46,7 @@ export function CompanyApp(props: { store: PanelStore }): React.ReactElement | n
 
   const state = panel.state
   const pending = state === undefined || state === null ? 0 : pendingApprovals(state).length
+  const unread = state === undefined || state === null ? 0 : unreadBoardMail(state)
 
   return (
     <div className="oc-root" role="dialog" aria-label="一人公司">
@@ -89,6 +90,7 @@ export function CompanyApp(props: { store: PanelStore }): React.ReactElement | n
                 <NavIcon view={item.id} />
                 <span>{item.label}</span>
                 {item.id === 'approvals' && pending > 0 && <span className="oc-nav__count">{pending}</span>}
+                {item.id === 'activity' && unread > 0 && <span className="oc-nav__count">{unread}</span>}
               </button>
             ))}
           </nav>

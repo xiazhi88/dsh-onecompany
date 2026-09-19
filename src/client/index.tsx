@@ -6,7 +6,7 @@
  */
 import React from 'react'
 import type { CompanyRemote } from './store.ts'
-import { companyRemoteOf, PanelStore, pendingApprovals } from './store.ts'
+import { companyRemoteOf, PanelStore, pendingApprovals, unreadBoardMail } from './store.ts'
 import { TYPERT_REMOTE } from './remote.ts'
 import { CompanyApp } from './CompanyApp.tsx'
 import { usePanel } from './ui.tsx'
@@ -51,13 +51,15 @@ function CompanyLauncher(props: { store: PanelStore; wide?: boolean }): React.Re
   const panel = usePanel(props.store)
   const state = panel.state
   const pending = state === null ? 0 : pendingApprovals(state).length
+  const unread = state === null ? 0 : unreadBoardMail(state)
+  const total = pending + unread
   const title = state === null
     ? '一人公司（加载中…）'
-    : `一人公司 · ${state.stats.agents} 员工 · ${pending} 待批 · 今日 ${state.stats.tokensToday} tokens`
+    : `一人公司 · ${state.stats.agents} 员工 · ${pending} 待批 · ${unread} 条未读消息 · 今日 ${state.stats.tokensToday} tokens`
   return (
     <button type="button" className="oc-launch oc-launch--compact" title={title} onClick={() => props.store.setOpen(true)}>
       <span className="oc-launch__mark">司</span>
-      <PendingDot count={pending} />
+      <PendingDot count={total} />
     </button>
   )
 }
@@ -67,16 +69,18 @@ function CompanyHeaderAction(props: { store: PanelStore }): React.ReactElement {
   const panel = usePanel(props.store)
   const state = panel.state
   const pending = state === null ? 0 : pendingApprovals(state).length
+  const unread = state === null ? 0 : unreadBoardMail(state)
+  const total = pending + unread
   return (
     <button
       type="button"
-      className={`oc-header-action ${pending > 0 ? 'oc-header-action--alert' : ''}`}
-      title={state === null ? '打开一人公司面板' : `一人公司 · ${state.stats.agents} 员工 · ${pending} 待批 · 今日 ${state.stats.tokensToday} tokens`}
+      className={`oc-header-action ${total > 0 ? 'oc-header-action--alert' : ''}`}
+      title={state === null ? '打开一人公司面板' : `一人公司 · ${state.stats.agents} 员工 · ${pending} 待批 · ${unread} 条未读 · 今日 ${state.stats.tokensToday} tokens`}
       onClick={() => props.store.setOpen(true)}
     >
       <span className="oc-header-action__mark">司</span>
       <span className="oc-header-action__text">公司</span>
-      <PendingDot count={pending} />
+      <PendingDot count={total} />
     </button>
   )
 }

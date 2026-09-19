@@ -215,10 +215,20 @@ function TaskDrawer(props: { state: CompanyState; store: PanelStore; task: TaskR
   )
 }
 
+type SortKey = 'updated' | 'created' | 'priority'
+
+/** 看板列内排序：默认按时间（最近更新的在前），也可按创建时间/优先级。 */
+function sortOf(key: SortKey): (a: TaskRecord, b: TaskRecord) => number {
+  if (key === 'created') return (a, b) => b.createdAt - a.createdAt
+  if (key === 'priority') return (a, b) => b.priority - a.priority || b.updatedAt - a.updatedAt
+  return (a, b) => b.updatedAt - a.updatedAt
+}
+
 /** 任务看板。 */
 export function Tasks(props: { state: CompanyState; store: PanelStore; onOpenAgent?: (agentId: string) => void }): React.ReactElement {
   const { state, store } = props
   const [creating, setCreating] = useState(false)
+  const [sort, setSort] = useState<SortKey>('updated')
   const selectedId = store.getSnapshot().selectedTaskId
   const selected = selectedId === null ? null : state.tasks.find((task) => task.id === selectedId) ?? null
 
@@ -227,13 +237,22 @@ export function Tasks(props: { state: CompanyState; store: PanelStore; onOpenAge
       <SectionTitle
         title="任务看板"
         sub={`${state.tasks.filter((task) => task.status !== 'done' && task.status !== 'cancelled').length} 项未完成 · 今日完成 ${state.stats.doneToday}`}
-        extra={<Btn variant="primary" onClick={() => setCreating(true)}>＋ 新建任务</Btn>}
+        extra={(
+          <div className="oc-row" style={{ gap: 6 }}>
+            <select className="oc-select" style={{ width: 128 }} value={sort} onChange={(event) => setSort(event.target.value as SortKey)}>
+              <option value="updated">按最近更新</option>
+              <option value="created">按创建时间</option>
+              <option value="priority">按优先级</option>
+            </select>
+            <Btn variant="primary" onClick={() => setCreating(true)}>＋ 新建任务</Btn>
+          </div>
+        )}
       />
       <div className="oc-board">
         {COLUMNS.map((column) => {
           const tasks = state.tasks
             .filter((task) => task.status === column.status)
-            .sort((a, b) => b.priority - a.priority || b.updatedAt - a.updatedAt)
+            .sort(sortOf(sort))
           return (
             <div className="oc-col" key={column.status}>
               <div className="oc-col__head">

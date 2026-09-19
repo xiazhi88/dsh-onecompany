@@ -449,6 +449,28 @@ export class CompanyService {
     return { ok: true, data: record }
   }
 
+  /** 把董事会信箱里所有未读标记为已读（面板「全部已读」）。 */
+  async markAllBoardRead(): Promise<ActionResult<{ count: number }>> {
+    let count = 0
+    for (const record of this.messages()) {
+      if (record.toType !== 'board' || record.status === 'read') continue
+      await this.deps.domain.table('messages').put(record.id, { ...record, status: 'read' })
+      count += 1
+    }
+    if (count > 0) await this.log(BOARD, 'mail.read-all', `董事会信箱：${count} 封标记已读`)
+    return { ok: true, data: { count } }
+  }
+
+  /** 远程：标记单封已读（Remote：markMessageRead）。 */
+  async markMessageReadRemote(id: string): Promise<ActionResult<MessageRecord>> {
+    return this.markRead(id)
+  }
+
+  /** 远程：全部已读（Remote：markAllBoardRead）。 */
+  async markAllBoardReadRemote(): Promise<ActionResult<{ count: number }>> {
+    return this.markAllBoardRead()
+  }
+
   /** 标记消息已读。 */
   async markRead(id: string): Promise<ActionResult<MessageRecord>> {
     const record = this.deps.domain.table('messages').get(id)

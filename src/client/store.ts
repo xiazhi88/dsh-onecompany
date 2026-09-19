@@ -33,6 +33,8 @@ export interface CompanyRemote {
   createScheduleRemote(input: ScheduleInput): Promise<Ack>
   deleteSchedule(id: string): Promise<Ack>
   setScheduleEnabledRemote(id: string, enabled: boolean): Promise<Ack>
+  markMessageRead(id: string): Promise<Ack>
+  markAllBoardRead(): Promise<Ack>
 }
 
 type RemoteResult<T> =
@@ -76,6 +78,8 @@ export function companyRemoteOf(value: unknown): CompanyRemote | undefined {
     createScheduleRemote: (input) => call<Ack>('createScheduleRemote', input),
     deleteSchedule: (id) => call<Ack>('deleteSchedule', id),
     setScheduleEnabledRemote: (id, enabled) => call<Ack>('setScheduleEnabledRemote', id, enabled),
+    markMessageRead: (id) => call<Ack>('markMessageRead', id),
+    markAllBoardRead: () => call<Ack>('markAllBoardRead'),
   }
 }
 
@@ -182,6 +186,8 @@ export class PanelStore {
 
   /** 上一次看到的待审批数（用于「有新审批」提醒）。 */
   private lastPending = 0
+  /** 上一次看到的未读信箱数（用于「有新消息」提醒）。 */
+  private lastUnread = 0
 
   private emit(patch: Partial<PanelState>): void {
     this.state = { ...this.state, ...patch }
@@ -242,6 +248,11 @@ export class PanelStore {
         this.notify(`有 ${pending - this.lastPending} 项新审批待裁决`, 'err')
       }
       this.lastPending = pending
+      const unread = unreadBoardMail(state)
+      if (unread > this.lastUnread && this.lastUnread !== 0) {
+        this.notify(`有 ${unread - this.lastUnread} 条新消息进董事会信箱（面板「动态」）`, 'ok')
+      }
+      this.lastUnread = unread
       // 指纹没变就不 emit：避免每轮轮询都重渲染整页（约 250 行）。
       if (this.state.state?.revision === state.revision) {
         if (this.state.loading) this.emit({ loading: false, error: null })
@@ -341,6 +352,11 @@ export function agentOf(state: CompanyState, agentId: string | null): AgentRecor
 }
 
 /** 审批计数。 */
+/** 董事会信箱未读数（红点要一起统计它，否则汇报来了看不出来）。 */
+export function unreadBoardMail(state: CompanyState): number {
+  return state.messages.filter((message) => message.toType === 'board' && message.status !== 'read').length
+}
+
 export function pendingApprovals(state: CompanyState): ApprovalRecord[] {
   return (state.approvals ?? []).filter((record) => record.status === 'pending')
 }

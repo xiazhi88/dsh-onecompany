@@ -12,7 +12,13 @@ export function Activity(props: { state: CompanyState; store: PanelStore }): Rea
 
   return (
     <div className="oc-stack">
-      <SectionTitle title="董事会信箱" sub={`${inbox.filter((message) => message.status !== 'read').length} 封未读`} />
+      <SectionTitle
+        title="董事会信箱"
+        sub={`${inbox.filter((message) => message.status !== 'read').length} 封未读 · 共 ${inbox.length} 封`}
+        extra={inbox.some((message) => message.status !== 'read')
+          ? <Btn size="sm" onClick={() => { void store.act('全部已读', (api) => api.markAllBoardRead()) }}>全部已读</Btn>
+          : undefined}
+      />
       {inbox.length === 0
         ? <Empty>信箱为空。员工汇报、求助、审批结果都会出现在这里。</Empty>
         : (
@@ -29,9 +35,11 @@ export function Activity(props: { state: CompanyState; store: PanelStore }): Rea
                       {' · '}{fmtTime(message.createdAt, state.now)}
                     </div>
                   </div>
-                  {message.status !== 'read' && (
-                    <Btn size="sm" onClick={() => { void store.refresh() }} title="标记已读稍后由后端支持">待读</Btn>
-                  )}
+                  {message.status !== 'read'
+                    ? (
+                      <Btn size="sm" onClick={() => { void store.act('标记已读', (api) => api.markMessageRead(message.id)) }}>标记已读</Btn>
+                    )
+                    : <span className="oc-muted" style={{ fontSize: 12 }}>已读</span>}
                 </div>
               ))}
             </div>
