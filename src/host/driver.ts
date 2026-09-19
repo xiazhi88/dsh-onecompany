@@ -17,6 +17,8 @@ import type { AgentRecord, ProjectRecord } from '../shared/wire.ts'
 
 /** 组合一个 agent 作用域所需的输入。 */
 export interface ComposeSpec {
+  /** 这个 agent 是什么角色（决定工具面收窄与提示词性质）。 */
+  kind: 'employee' | 'hall' | 'channel'
   /** 作用域内注册的公司工具。 */
   tools: ToolDefinition[]
   /** 提示词段文本（每次组装时求值）。 */
@@ -48,6 +50,8 @@ export interface DriverDeps {
   defaultModel: () => { provider?: string; model?: string; reasoningEffort?: string } | undefined
   /** 常驻上限（员工与频道共享一个池）。 */
   maxResident: number
+  /** 给公司 agent 禁掉用不到的工具（省下每步的工具 schema token）。 */
+  restrictTools?: (agentCtx: Context, kind: 'employee' | 'hall' | 'channel') => void
   /**
    * 新建会话后的开场消息：没有跑过轮次的会话是 blank，会被客户端从侧栏隐藏，
    * 也选不中；发一句话既让它可见，也让员工/频道正式亮相。空串 = 不发。
@@ -282,6 +286,7 @@ export class AgentDriver {
     } else {
       this.deps.log('本部署未挂载 agent-presets，该 agent 只有公司工具可用')
     }
+    this.applyToolRestriction(agentCtx, spec.kind)
     for (const tool of spec.tools) {
       agentCtx.tools.register(tool)
     }
@@ -290,6 +295,21 @@ export class AgentDriver {
       order: 60,
       text: spec.prompt,
     })
+  }
+
+  /**
+   * 收窄工具面：把「会话迁移 / 编排 / 可视化」这类与公司工作无关的宿主级工具
+   * 从模型视野移除。它们在宿主层全局注册，合计约 3 万字符 schema（≈8-10k token/步），
+   * 而员工与 CEO 一次都用不到。`tools.restrict()` 必须在 agent 作用域调用。
+   */
+  private applyToolRestriction(agentCtx: Context, kind: 'employee' | 'hall' | 'channel'): void {
+    const restrict = this.deps.restrictTools
+    if (restrict === undefined) return
+    try {
+      restrict(agentCtx, kind)
+    } catch (error) {
+      this.deps.log(`收窄工具面失败（${kind}，不影响创建）：${describe(error)}`)
+    }
   }
 
   /** 员工 agent 的模型路由选项：记录显式指定优先，否则继承部署默认。 */

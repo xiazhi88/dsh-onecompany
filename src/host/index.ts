@@ -26,12 +26,29 @@ export interface Config {
   tickMs: number
   maxResidentAgents: number
   defaultDailyTokenCap: number
+  /** CEO 每日 token 上限（大厅 + 项目群实例合计）。 */
+  ceoDailyTokenCap: number
   approvalsRequired: string[]
   timeZone: string
   /** 启动时自动补建 CEO 与项目群会话。 */
   autoProvision: boolean
   /** 新建会话后发一条开场消息（让会话有首个轮次、出现在侧栏）。 */
   kickoffOnCreate: boolean
+  /** 员工工位是否也发开场消息（默认否：员工只在被派活时醒来）。 */
+  employeeKickoff: boolean
+  /** 是否给公司 agent 收窄工具面（禁掉与工作无关的宿主工具）。 */
+  leanTools: boolean
+  /**
+   * 精简提示词：把「每轮都在变的动态清单」（当前任务、全公司未完成任务、档案列表）
+   * 从系统提示词里去掉，改为让模型用时再查（company_task_list / company_doc_list）。
+   *
+   * 为什么重要：系统提示词在 prompt 最前面，缓存是前缀匹配——只要其中任何一段变化，
+   * 它之后的内容（整段对话历史）就全部 miss、按全价重算。动态清单放系统提示词里
+   * 等于每轮把历史重发一遍全价。
+   */
+  compactPrompt: boolean
+  /** 要禁掉的工具名（跨部署安全：不存在的名字会被自动忽略）。 */
+  deniedTools: string[]
   /**
    * 汇报投递模式：
    * - `digest`（默认）CEO 把原始汇报转成给董事会的易读简报（会有一轮模型调用）
@@ -45,11 +62,21 @@ export const Config: Schema<Config> = Schema.object({
   companyName: Schema.string().default('一人公司'),
   tickMs: Schema.number().default(30_000),
   maxResidentAgents: Schema.number().default(8),
-  defaultDailyTokenCap: Schema.number().default(5_000_000),
+  defaultDailyTokenCap: Schema.number().default(2_000_000),
+  ceoDailyTokenCap: Schema.number().default(8_000_000),
   approvalsRequired: Schema.array(Schema.string()).default(['hire', 'spend', 'strategy', 'danger']),
   timeZone: Schema.string().default('Asia/Shanghai'),
   autoProvision: Schema.boolean().default(true),
   kickoffOnCreate: Schema.boolean().default(true),
+  employeeKickoff: Schema.boolean().default(false),
+  leanTools: Schema.boolean().default(true),
+  compactPrompt: Schema.boolean().default(true),
+  deniedTools: Schema.array(Schema.string()).default([
+    'import_chat', 'export_chat', 'export_bundle', 'restore_bundle', 'sync_to_claude',
+    'scan_discover', 'list_imported_sessions', 'retract_import', 'import_agents',
+    'import_settings', 'import_mcp', 'doctor', 'verify_session',
+    'workflow', 'ralph', 'visualize',
+  ]),
   reportDelivery: Schema.union(['digest', 'record']).default('record'),
 })
 
@@ -139,10 +166,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     config: {
       tickMs: config.tickMs,
       defaultDailyTokenCap: config.defaultDailyTokenCap,
+      ceoDailyTokenCap: config.ceoDailyTokenCap,
       approvalsRequired: config.approvalsRequired,
       timeZone: config.timeZone,
       companyName: config.companyName,
       reportDelivery: config.reportDelivery,
+      compactPrompt: config.compactPrompt,
     },
     deliver: async (record, text, notice) => {
       if (driver === undefined) throw new Error('员工驱动尚未就绪')
@@ -178,21 +207,53 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const tools = buildCompanyTools(service, record.id)
     const extras = record.role === 'ceo' || record.permissions.canApprove ? buildCeoExtras(service, record.id) : []
     return {
+      kind: record.role === 'ceo' ? 'hall' : 'employee',
       tools: [...tools, ...extras],
       prompt: () => service.employeePrompt(record.id),
       presetId: record.presetId,
     }
   }
   const composeChannel = (project: ProjectRecord): ComposeSpec => ({
+    kind: 'channel',
     tools: buildChannelTools(service),
     prompt: () => service.channelPrompt(project.id),
     presetId: null,
   })
   const composeHall = (record: AgentRecord): ComposeSpec => ({
+    kind: 'hall',
     tools: [...buildCompanyTools(service, record.id), ...buildCeoExtras(service, record.id)],
     prompt: () => service.hallPrompt(),
     presetId: record.presetId,
   })
+
+  /**
+   * 收窄工具面：把与公司工作无关的宿主级工具（会话迁移、编排、可视化等）
+   * 从模型视野移除——它们每步占用约 3 万字符 schema（≈8-10k token），
+   * 而员工与 CEO 一次都用不到。未知名字会抛错，故失败时按错误里的已知清单重试。
+   */
+  const restrictTools = (agentCtx: Context, kind: 'employee' | 'hall' | 'channel'): void => {
+    if (!config.leanTools) return
+    const tools = (agentCtx as unknown as { tools?: { restrict: (filter: { deny: string[] }) => () => void } }).tools
+    if (tools === undefined) return
+    const deny = config.deniedTools
+    const attempt = (names: string[]): void => {
+      if (names.length === 0) return
+      try {
+        const dispose = tools.restrict({ deny: names })
+        agentCtx.effect(() => dispose, 'onecompany: lean tools')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        const known = /known global tools: (.+)$/.exec(message)?.[1]?.split(/,\s*/) ?? []
+        const usable = names.filter((name) => known.includes(name))
+        if (usable.length > 0 && usable.length < names.length) {
+          attempt(usable)
+          return
+        }
+        log(`收窄工具面失败（${kind}）：${message.slice(0, 160)}`)
+      }
+    }
+    attempt(deny)
+  }
 
   driver = new AgentDriver({
     ctx,
@@ -225,8 +286,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
     },
     maxResident: Math.max(1, config.maxResidentAgents),
+    restrictTools,
     kickoff: (kind, label) => {
       if (!config.kickoffOnCreate) return ''
+      if (kind === 'employee' && !config.employeeKickoff) return ''
       if (kind === 'hall') return '【公司大厅已就绪】请用一句话向董事会自我介绍（你的名字「司南」、职责、如何给你派活），然后待命，不要调用工具。'
       if (kind === 'channel') return `【项目群已就绪】${label}：请用一句话说明本群用途（项目、当前进度、如何派活给团队），然后待命，不要调用工具。`
       return `【入职确认】${label}：请用一句话确认到岗（你的名字、职位、负责项目、你会怎么汇报），然后待命，不要调用工具。`
