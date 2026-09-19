@@ -137,8 +137,9 @@ export class AgentDriver {
       meta: {
         cwd: employee.cwd,
         ...(employee.presetId === null ? {} : { agentPreset: employee.presetId }),
-        // 子代理血统：客户端据此把该会话从侧栏隐藏，改为显示在父会话的「N 个子代理」里。
-        origin: 'subagent',
+        // 只留血统、不标 subagent：侧栏靠「未归入工作区」隐藏，而客户端那个
+        // 「N 个子代理」下拉只认 origin='subagent' + 子代理运行时的生命周期投影，
+        // 插件自建会话没有那份投影，标了会卡在「正在加载子代理…」，所以不标。
         ...(task.parentSessionId === null ? {} : { parentSession: task.parentSessionId }),
       },
       options: this.optionsOf(employee),
@@ -227,7 +228,7 @@ export class AgentDriver {
     sessionId: string,
     resume: boolean,
     spec: {
-      meta: { cwd: string; agentPreset?: string; origin?: 'subagent'; parentSession?: string }
+      meta: { cwd: string; agentPreset?: string; parentSession?: string }
       options: AgentOptions
       compose: (agentCtx: Context) => Promise<void>
       title: string
@@ -286,7 +287,7 @@ export class AgentDriver {
   private async createKeyed(
     sessionId: string,
     spec: {
-      meta: { cwd: string; agentPreset?: string; origin?: 'subagent'; parentSession?: string }
+      meta: { cwd: string; agentPreset?: string; parentSession?: string }
       options: AgentOptions
       compose: (agentCtx: Context) => Promise<void>
       title: string

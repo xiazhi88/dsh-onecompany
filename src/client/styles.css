@@ -735,3 +735,45 @@
   line-height: 1.6;
   color: var(--dsw-alias-label-primary, #e9ecf3);
 }
+
+/* ── 会话标题栏：本会话派出的任务归纳 ───────────────────────────── */
+
+.oc-head-group { display: inline-flex; align-items: center; gap: 6px; position: relative; }
+.oc-header-action--plain { padding: 0 8px; }
+.oc-caret { font-size: 9px; opacity: 0.75; }
+
+.oc-tasks-chip { position: relative; display: inline-flex; }
+.oc-tasks-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 268px;
+  max-width: 380px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.14));
+  background: var(--dsw-alias-bg-layer-2, #1b1f27);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.oc-tasks-pop__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.oc-tasks-pop__row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.07)); }
+.oc-tasks-pop__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.oc-tasks-pop__title { font-weight: 600; }
+.oc-tasks-pop__sub { color: var(--dsw-alias-label-secondary, #9aa3b4); font-size: 11.5px; }
