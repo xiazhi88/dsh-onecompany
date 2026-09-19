@@ -33,6 +33,7 @@ function AgentCard(props: {
               <StatusDot tone={tone} />
             </div>
             <div className="oc-stat__hint">{agent.title} · {agent.model ?? '默认模型'}{agent.effort === null ? '' : `（${agent.effort}）`}</div>
+            <div className="oc-stat__hint">每日预算：{agent.dailyTokenCap === null ? '不限' : `${fmtTokens(agent.dailyTokenCap)} tokens`}</div>
           </div>
           {agent.status !== 'active' && <Pill tone={agent.status === 'paused' ? 'warn' : 'err'}>{agent.status === 'paused' ? '已暂停' : '已离职'}</Pill>}
         </div>
@@ -180,7 +181,7 @@ function AgentForm(props: {
           <Field label="推理强度"><input className="oc-input" value={effort} onChange={(event) => setEffort(event.target.value)} placeholder="medium" /></Field>
         </div>
       </div>
-      <Field label="每日 token 预算" hint="超出后暂停向其投递消息，并通知董事会。留空表示不限。">
+      <Field label="每日 token 预算" hint="超出后暂停向其投递消息，并通知董事会。留空 = 不限；一旦在这里设定过，重启不会被打回默认值。">
         <input className="oc-input" value={cap} onChange={(event) => setCap(event.target.value)} placeholder="5000000" />
       </Field>
     </Modal>

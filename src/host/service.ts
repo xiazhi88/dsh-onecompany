@@ -345,6 +345,8 @@ export class CompanyService {
       // 新员工默认无派活/建任务/自我排程权（工作只由董事会分发）
       permissions: { ...DEFAULT_PERMISSIONS, canDispatch: false, ...(input.permissions ?? {}) },
       dailyTokenCap: input.dailyTokenCap ?? this.deps.config.defaultDailyTokenCap,
+      // 只在真给了数字时锁定；留空 = 用部署默认且不锁定（以后调默认值仍会跟随）
+      budgetPinned: input.dailyTokenCap !== undefined && input.dailyTokenCap !== null,
       createdAt: now,
       updatedAt: now,
     }
@@ -376,7 +378,7 @@ export class CompanyService {
       ...(patch.effort !== undefined ? { effort: patch.effort } : {}),
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.permissions !== undefined ? { permissions: patch.permissions } : {}),
-      ...(patch.dailyTokenCap !== undefined ? { dailyTokenCap: patch.dailyTokenCap } : {}),
+      ...(patch.dailyTokenCap !== undefined ? { dailyTokenCap: patch.dailyTokenCap, budgetPinned: true } : {}),
       updatedAt: Date.now(),
     }
     if (next.managerId === id) return { ok: false, code: 'self_manager', message: '不能向自己汇报' }
@@ -1685,10 +1687,11 @@ export class CompanyService {
     // 预算兜底：没有显式预算的 agent 按角色补默认上限（CEO 上限更高），
     // 超限后投递会被暂停到次日——这是「token 消耗失控」的硬止损。
     for (const record of this.agents()) {
-      if (record.dailyTokenCap !== null) continue
+      // 只补「从没设过」的：董事会显式设过（含显式「不限」= null）就不再干预。
+      if (record.budgetPinned || record.dailyTokenCap !== null) continue
       const cap = record.role === 'ceo' ? this.deps.config.ceoDailyTokenCap : this.deps.config.defaultDailyTokenCap
       await this.deps.domain.table('agents').put(record.id, { ...record, dailyTokenCap: cap, updatedAt: Date.now() })
-      this.deps.log(`已给「${record.name}」设默认预算 ${cap} tokens/日`)
+      this.deps.log(`已给「${record.name}」设默认预算 ${cap} tokens/日（未显式设定过）`)
     }
     for (const record of this.agents()) {
       if (record.role === 'ceo') continue
@@ -1737,6 +1740,7 @@ export class CompanyService {
       status: 'active',
       permissions: { projects: { '*': 'write' }, tools: [], canHire: false, canApprove: true, canDispatch: true },
       dailyTokenCap: null,
+      budgetPinned: false, // 用默认值；改了默认值或董事会在面板里设过才固定
       createdAt: now,
       updatedAt: now,
     }

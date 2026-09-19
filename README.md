@@ -248,6 +248,8 @@ lib/           构建产物（随仓库提供，从 GitHub 安装即可用，无
   改为用时 `company_task_list` / `company_doc_list` 查。
 - **每日 token 预算**：`defaultDailyTokenCap`（员工默认 2M）与 `ceoDailyTokenCap`（默认 8M），
   超限即暂停该 agent 的信箱投递到次日，并在面板/大厅提示。
+  ⚠️ 兜底只补「从没设过」的 agent：董事会在面板里设过（**包括显式设成「不限」**）就记
+  `budgetPinned`，重启不会再被打回默认值。
 - **少叫醒**：`reportDelivery: record`（汇报不叫醒）、`employeeKickoff: false`（入职不发开场）。
 
 **还可以再省的（按收益排序）**

@@ -41,6 +41,11 @@ export const zAgent = z.object({
   status: zAgentStatus,
   permissions: zPermissions,
   dailyTokenCap: z.number().nullable(),
+  /**
+   * 董事会是否**显式**设定过 token 预算（含显式设成「不限」= null）。
+   * reconcile 的兜底只补「从没设过」的 agent——否则用户设的不限会被打回默认值。
+   */
+  budgetPinned: z.boolean().default(false),
   createdAt: z.number(),
   updatedAt: z.number(),
 })
@@ -271,7 +276,8 @@ export const zHireInput = z.object({
   model: z.string().nullable(),
   effort: z.string().nullable(),
   presetId: z.string().nullable(),
-  dailyTokenCap: z.number().nullable(),
+  /** 可选：显式预算（null = 显式不限）。省略 = 用部署默认且**不锁定**。 */
+  dailyTokenCap: z.number().nullable().optional(),
   permissions: zPermissions.partial().optional(),
 })
 export type HireInput = z.infer<typeof zHireInput>
