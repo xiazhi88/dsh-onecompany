@@ -9,7 +9,7 @@ import type { CompanyRemote } from './store.ts'
 import { companyRemoteOf, PanelStore, pendingApprovals, unreadBoardMail } from './store.ts'
 import { TYPERT_REMOTE } from './remote.ts'
 import { CompanyApp } from './CompanyApp.tsx'
-import { usePanel } from './ui.tsx'
+import { TASK_STATUS_LABEL, TaskStatusIcon, usePanel } from './ui.tsx'
 import styles from './styles.css'
 
 /** 客户端上下文（只声明本插件用到的席位）。 */
@@ -137,11 +137,11 @@ function CompanyHeaderAction(props: { store: PanelStore; sessionId?: string }): 
                     if (task.sessionId !== null) props.store.openSession(task.sessionId)
                   }}
                 >
-                  <span className={`oc-dot oc-dot--${task.status === 'in_progress' ? 'on' : task.status === 'blocked' ? 'dead' : task.status === 'done' ? 'off' : 'idle'}`} />
+                  <span style={{ marginTop: 2 }}><TaskStatusIcon status={task.status} /></span>
                   <span className="oc-tasks-pop__main">
                     <span className="oc-tasks-pop__title">{task.title}</span>
-                    <span className="oc-tasks-pop__sub">
-                      {task.id} · {nameOf(task.assigneeId)} · {task.status}
+                    <span className="oc-tasks-pop__sub oc-tasks-pop__status">
+                      {task.id} · {nameOf(task.assigneeId)} · {TASK_STATUS_LABEL[task.status] ?? task.status}
                       {task.sessionId === null ? ' · 无执行会话' : ''}
                     </span>
                   </span>

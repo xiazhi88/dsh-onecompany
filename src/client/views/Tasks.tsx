@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import type { CompanyState, TaskRecord, TaskStatus } from '../../shared/wire.ts'
 import type { PanelStore } from '../store.ts'
 import { agentOf, fmtTime, fmtTimeShort, nameOf } from '../store.ts'
-import { Avatar, Btn, Empty, Expandable, Field, Md, Modal, Pill, SectionTitle } from '../ui.tsx'
+import { Avatar, Btn, Empty, Expandable, Field, Md, Modal, Pill, SectionTitle, TASK_STATUS_LABEL, TaskStatusIcon } from '../ui.tsx'
 
 const COLUMNS: { status: TaskStatus; title: string }[] = [
   { status: 'todo', title: '待办' },
@@ -13,9 +13,7 @@ const COLUMNS: { status: TaskStatus; title: string }[] = [
   { status: 'done', title: '已完成' },
 ]
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  todo: '待办', in_progress: '进行中', blocked: '阻塞', review: '待验收', done: '已完成', cancelled: '已取消',
-}
+const STATUS_LABEL = TASK_STATUS_LABEL
 
 /** 新建任务弹层。 */
 function TaskForm(props: { state: CompanyState; store: PanelStore; onClose: () => void }): React.ReactElement {
@@ -264,6 +262,7 @@ export function Tasks(props: { state: CompanyState; store: PanelStore; onOpenAge
                 {tasks.map((task) => (
                   <div className="oc-task" key={task.id} onClick={() => store.selectTask(task.id)}>
                     <div className="oc-task__head">
+                      <TaskStatusIcon status={task.status} />
                       <span className="oc-task__title">{task.title}</span>
                       {task.priority > 0 && <span className="oc-task__pri">P{task.priority}</span>}
                     </div>

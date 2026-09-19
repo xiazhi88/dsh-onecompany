@@ -137,6 +137,34 @@ export function Toast(props: { text: string; kind: 'ok' | 'err' }): React.ReactE
 }
 
 /** 导航图标（内联 SVG，16px 线性）。 */
+/** 任务状态的中文标签（多处共用，别再各写一份）。 */
+export const TASK_STATUS_LABEL: Record<string, string> = {
+  todo: '待办', in_progress: '进行中', blocked: '阻塞', review: '待验收', done: '已完成', cancelled: '已取消',
+}
+
+/**
+ * 任务状态图标：进行中转圈、阻塞/待验收呼吸、完成打勾、待办空心圈。
+ * 动画让「正在跑」的事一眼可见，不用读文字。
+ */
+export function TaskStatusIcon(props: { status: string }): React.ReactElement {
+  const stroke = 'currentColor'
+  const common = { width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke, strokeWidth: 2.4, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  switch (props.status) {
+    case 'in_progress':
+      return <span className="oc-st oc-st--run" title="进行中"><svg {...common}><path d="M12 3a9 9 0 1 0 9 9" /></svg></span>
+    case 'review':
+      return <span className="oc-st oc-st--review" title="待验收"><svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></svg></span>
+    case 'blocked':
+      return <span className="oc-st oc-st--blocked" title="阻塞"><svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16.5v.01" /></svg></span>
+    case 'done':
+      return <span className="oc-st oc-st--done" title="已完成"><svg {...common}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg></span>
+    case 'cancelled':
+      return <span className="oc-st oc-st--cancel" title="已取消"><svg {...common}><circle cx="12" cy="12" r="9" /><path d="M9 12h6" /></svg></span>
+    default:
+      return <span className="oc-st oc-st--todo" title="待办"><svg {...common}><circle cx="12" cy="12" r="9" /></svg></span>
+  }
+}
+
 export function NavIcon(props: { view: ViewId }): React.ReactElement {
   const common = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
   switch (props.view) {
