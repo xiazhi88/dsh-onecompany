@@ -51,6 +51,8 @@ export interface ServiceDeps {
     taskSession: 'per-task' | 'resident'
     /** 任务执行会话超时小时数（0 = 不超时）。 */
     taskSessionTimeoutHours: number
+    /** 单个任务会话 token 上限（0 = 不限）。 */
+    taskTokenCap: number
   }
   /** 向某员工的会话投递一条消息。 */
   deliver: (record: AgentRecord, text: string, notice?: string) => Promise<void>
@@ -110,8 +112,43 @@ export class CompanyService {
    * 只靠「数量 + 时间戳」会漏掉不改变这两者的写入（例如排程暂停）。
    */
   private writeSeq = 0
+  /**
+   * 每个会话最近一次是「谁触发的轮次」：board（董事会在说话）还是 company
+   * （汇报回投 / 任务帧 / 排程 / 转投这些公司内部投递）。
+   *
+   * 用途：**派活只允许由董事会消息触发的轮次发起**。否则会出现链式续派：
+   * 任务完成 → 汇报唤醒 CEO → 它觉得"还有下一批" → 再派一条 → 循环（实测过：
+   * 一次简单安排繁殖出 18 条任务、单日 1.47B 输入 token）。
+   */
+  private readonly triggers = new Map<string, { kind: 'board' | 'company'; at: number }>()
+
+  /** 标记某会话的轮次来源（driver 投递公司内部消息时调 company；董事会发言时调 board）。 */
+  noteTrigger(sessionId: string, kind: 'board' | 'company'): void {
+    this.triggers.set(sessionId, { kind, at: Date.now() })
+  }
+
+  /** 这个会话最近的轮次是不是董事会触发的。 */
+  private boardTriggered(sessionId: string | null): boolean {
+    if (sessionId === null) return false
+    return this.triggers.get(sessionId)?.kind === 'board'
+  }
+
+  /** 派活来源闸门：agent 只能在「董事会触发的轮次」里派活。 */
+  private assertBoardTriggered(actor: Actor, sessionId: string | null): ActionResult<never> | null {
+    if (actor.type !== 'agent') return null
+    const target = sessionId ?? this.agent(actor.id)?.sessionId ?? null
+    if (target === null || this.boardTriggered(target)) return null
+    return {
+      ok: false,
+      code: 'not_board_triggered',
+      message: '这次轮次不是董事会发起的（来自汇报/排程/转投），不能派活。把「建议的下一步」写进 company_report 或 company_announce，等董事会点头；禁止从任务完成里自动续派下一批。',
+    } as ActionResult<never>
+  }
+
   /** 待停止的执行会话（任务已收尾，等 agent 空闲后由 tick 停）。 */
   private readonly stopRequested = new Set<string>()
+  /** 每个任务会话已消耗的 token（硬止损用；重启清零，不追求跨重启精确）。 */
+  private readonly taskSpend = new Map<string, number>()
 
   constructor(private readonly deps: ServiceDeps) {}
 
@@ -545,6 +582,7 @@ export class CompanyService {
           continue
         }
         try {
+          this.noteTrigger(project.channelSessionId ?? '', 'company')
           await this.deps.deliverChannel(
             project,
             renderChannelFrame(record, this.taskLabel(record.taskId), this.agentNameOf(record.fromId)),
@@ -583,6 +621,7 @@ export class CompanyService {
         const notice = record.kind === 'announce'
           ? `${this.agentNameOf(record.fromId)} 的播报已转投（${excerpt(record.body)}）`
           : undefined
+        this.noteTrigger(recipient.sessionId, 'company')
         await this.deps.deliver(recipient, body, notice)
         await this.deps.domain.table('messages').put(record.id, { ...record, status: 'delivered', deliveredAt: Date.now() })
         delivered += 1
@@ -676,6 +715,7 @@ export class CompanyService {
         }
         await this.deps.domain.table('messages').put(mail.id, mail)
         try {
+          this.noteTrigger(record.sessionId ?? '', 'company')
           await this.deps.deliverTask(record, assignee, frame)
         } catch (error) {
           const message = describe(error)
@@ -1088,19 +1128,23 @@ export class CompanyService {
    * @param input - 员工、种类、规格与提示词。
    */
   async createSchedule(actor: Actor, input: ScheduleInput): Promise<ActionResult<ScheduleRecord>> {
-    if (actor.type === 'agent' && !this.mayDispatch(actor)) {
+    if (actor.type === 'agent') {
       return {
         ok: false,
         code: 'no_schedule_permission',
-        message: '例行工作也要董事会定：不要自己排程。把「建议的周期性工作 + 周期 + 理由」写进 company_report，董事会会在面板「排程」页建。',
+        message: '排程只能由董事会建（面板「排程」页）：agent 不得自我排程——那会变成自我唤醒链，'
+          + '实测过 CEO 用「自持观察链」把自己反复唤醒、一天烧掉上亿 token。'
+          + '把「建议的周期 + 理由」写进 company_report，等董事会决定。',
       }
     }
+
     const agent = this.agent(input.agentId)
     if (agent === undefined) return { ok: false, code: 'unknown_agent', message: `员工 ${input.agentId} 不存在` }
     const parsed = parseSchedule(input, this.deps.config.timeZone)
     if (!parsed.ok) return parsed
     const record: ScheduleRecord = {
       id: `sch_${randomUUID().slice(0, 8)}`,
+      createdBy: actor.type,
       agentId: input.agentId,
       kind: input.kind,
       cron: input.kind === 'cron' ? input.spec.trim() : null,
@@ -1139,7 +1183,8 @@ export class CompanyService {
         nextRunAt = record.at
       } else nextRunAt = nextCron(record.cron ?? '', now, record.timeZone) ?? Number.MAX_SAFE_INTEGER
     }
-    const next: ScheduleRecord = { ...record, enabled, nextRunAt, lastOutcome: enabled ? null : record.lastOutcome }
+    // 董事会一旦在面板里启用过，就归董事会（reconcile 不再暂停它）
+    const next: ScheduleRecord = { ...record, enabled, nextRunAt, ...(enabled ? { createdBy: 'board' } : {}), lastOutcome: enabled ? null : record.lastOutcome }
     await this.deps.domain.table('schedules').put(id, next)
     await this.log(BOARD, enabled ? 'schedule.enable' : 'schedule.pause', `${this.agentNameOf(record.agentId)}：${describeSchedule(record)}`)
     return { ok: true, data: next }
@@ -1178,6 +1223,7 @@ export class CompanyService {
         lastRunAt: now,
         lastOutcome: 'fired',
       })
+      this.noteTrigger(this.agent(record.agentId)?.sessionId ?? '', 'company')
       await this.sendMail(SYSTEM, {
         toId: agent.id,
         kind: 'task_notice',
@@ -1211,6 +1257,11 @@ export class CompanyService {
    * @param event - 会话事件。
    */
   async foldEvent(sessionId: string, event: { type: string; data?: unknown }): Promise<void> {
+    // 轮次来源：董事会自己发的消息 → board（只有这种轮次允许派活）
+    if (event.type === 'user/message') {
+      const source = (event.data as { source?: { kind?: string } } | undefined)?.source
+      if (source?.kind !== 'plugin') this.noteTrigger(sessionId, 'board')
+    }
     const record = this.ownerOf(sessionId)
     if (record === undefined) return
     const at = Date.now()
@@ -1249,6 +1300,24 @@ export class CompanyService {
     reasoningTokens?: number
   }): Promise<void> {
     if (sessionId === undefined) return
+    const spent = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+    const task = this.tasks().find((entry) => entry.sessionId === sessionId)
+    if (task !== undefined) {
+      const total = (this.taskSpend.get(sessionId) ?? 0) + spent
+      this.taskSpend.set(sessionId, total)
+      const cap = this.deps.config.taskTokenCap
+      if (cap > 0 && total > cap && task.status !== 'done' && task.status !== 'cancelled') {
+        this.stopRequested.add(task.id)
+        void this.deps.domain.table('comments').put(`cmt_${randomUUID().slice(0, 8)}`, {
+          id: `cmt_${randomUUID().slice(0, 8)}`, taskId: task.id,
+          authorType: 'system', authorId: 'system', authorName: '公司调度',
+          text: `执行会话 token 已超上限（${Math.round(total / 1e6)}M > ${Math.round(cap / 1e6)}M），已停止。`
+            + '如仍需继续：把这件活拆小重新派发，或在面板把上限调高。',
+          createdAt: Date.now(),
+        })
+        this.deps.log(`任务 ${task.id} 超预算（${Math.round(total / 1e6)}M），已登记停止`)
+      }
+    }
     const record = this.ownerOf(sessionId)
     if (record === undefined) return
     const at = Date.now()
@@ -1571,6 +1640,8 @@ export class CompanyService {
    * @param input - 任务与负责人。
    */
   async dispatch(actor: Actor, input: TaskInput & { employeeId: string }): Promise<ActionResult<TaskRecord>> {
+    const gate = this.assertBoardTriggered(actor, input.parentSessionId ?? null)
+    if (gate !== null) return gate
     if (this.agent(input.employeeId) === undefined) {
       return { ok: false, code: 'unknown_assignee', message: `员工 ${input.employeeId} 不存在` }
     }
@@ -1702,6 +1773,18 @@ export class CompanyService {
   async reconcile(): Promise<void> {
     if (this.ceo() === undefined) await this.createCeo()
     const ceo = this.ceo()
+
+    // agent 自建的排程一律暂停（它们会变成自我唤醒链）。董事会可在面板「排程」页
+    // 逐条恢复——恢复是董事会的显式动作，不再由 agent 决定。
+    for (const schedule of this.schedules()) {
+      if (!schedule.enabled) continue
+      const owner = this.agent(schedule.agentId)
+      if (owner === undefined) continue
+      if (schedule.createdBy === 'board') continue
+      await this.deps.domain.table('schedules').put(schedule.id, { ...schedule, enabled: false })
+      await this.log(SYSTEM, 'schedule.pause-agent-made', `${owner.name} 自建排程已暂停：${schedule.prompt.slice(0, 40)}`)
+      this.deps.log(`已暂停 ${owner.name} 的自建排程 ${schedule.id}（自我唤醒链）`)
+    }
 
     // 历史任务归位（含纠错）：带项目且有项目群的任务，一律归该项目群。
     // —— 早期版本把项目任务的父会话写成了大厅（字段刚加时群会话 id 还没写回），

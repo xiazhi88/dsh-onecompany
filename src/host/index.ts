@@ -44,6 +44,8 @@ export interface Config {
   taskSession: 'per-task' | 'resident'
   /** 任务执行会话的超时小时数：超过就停止会话并在任务里留言（0 = 不超时）。 */
   taskSessionTimeoutHours: number
+  /** 单个任务会话的 token 上限（输入+输出+缓存合计，0 = 不限）。超过即停会话并在任务里留言。 */
+  taskTokenCap: number
   /** 是否给公司 agent 收窄工具面（禁掉与工作无关的宿主工具）。 */
   leanTools: boolean
   /**
@@ -79,6 +81,8 @@ export const Config: Schema<Config> = Schema.object({
   employeeKickoff: Schema.boolean().default(false),
   taskSession: Schema.union(['per-task', 'resident']).default('per-task'),
   taskSessionTimeoutHours: Schema.number().default(12),
+  // 实测过单个任务跑到 3 亿+ token：默认 8M 是很宽松的止损线，不是配额。
+  taskTokenCap: Schema.number().default(8_000_000),
   leanTools: Schema.boolean().default(true),
   compactPrompt: Schema.boolean().default(true),
   deniedTools: Schema.array(Schema.string()).default([
@@ -184,6 +188,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       compactPrompt: config.compactPrompt,
       taskSession: config.taskSession,
       taskSessionTimeoutHours: config.taskSessionTimeoutHours,
+      taskTokenCap: config.taskTokenCap,
     },
     deliver: async (record, text, notice) => {
       if (driver === undefined) throw new Error('员工驱动尚未就绪')

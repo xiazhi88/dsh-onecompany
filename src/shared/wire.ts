@@ -152,6 +152,9 @@ export const zApproval = z.object({
 
 export const zSchedule = z.object({
   id: z.string(),
+  /** 谁建的：'board'（董事会，含面板启用）或 'agent'。空字符串 = 旧记录（未知）。
+   *  规则：非 'board' 的排程在启动时会被暂停——agent 自建排程会变成自我唤醒链。 */
+  createdBy: z.string().default(''),
   agentId: z.string(),
   kind: zScheduleKind,
   cron: z.string().nullable(),
